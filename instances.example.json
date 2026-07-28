@@ -1,0 +1,20 @@
+[
+  {
+    "userId": "multplanos01",
+    "instanceName": "multplanos01",
+    "clientName": "Multi Planos",
+    "enabled": true,
+    "maxContactsPerCampaign": 5000,
+    "minDelayMs": 8000,
+    "maxDelayMs": 25000
+  },
+  {
+    "userId": "cliente-teste",
+    "instanceName": "instancia-teste",
+    "clientName": "Cliente Teste",
+    "enabled": false,
+    "maxContactsPerCampaign": 100,
+    "minDelayMs": 10000,
+    "maxDelayMs": 30000
+  }
+]
