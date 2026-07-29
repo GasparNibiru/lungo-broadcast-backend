@@ -12,6 +12,7 @@ dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
+const VERSION = '1.2.0';
 const ROOT = path.resolve(__dirname, '..');
 const UPLOAD_DIR = path.join(ROOT, 'storage', 'uploads');
 const INSTANCES_FILE = path.join(ROOT, 'data', 'instances.json');
@@ -19,6 +20,7 @@ const INSTANCES_FILE = path.join(ROOT, 'data', 'instances.json');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 app.disable('x-powered-by');
 
+// CORS liberado para testes de integração frontend/backend.
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.header('Vary', 'Origin');
@@ -166,11 +168,16 @@ function cellToPlainText(value) {
     return Math.trunc(value).toString();
   }
 
-  let text = String(value).trim();
+  let text = String(value).trim().replace(/\u00A0/g, ' ');
   if (text.startsWith("'")) text = text.slice(1);
 
+  // Corrige textos como 5531999999999.0
+  if (/^\d+\.0+$/.test(text)) return text.replace(/\.0+$/, '');
+
   const compact = text.replace(/\s/g, '').replace(',', '.');
-  if (/^\d+(\.\d+)?e\+?\d+$/i.test(compact)) {
+
+  // Corrige notação científica, ex.: 5.532E+12
+  if (/^\d+(\.\d+)?e[+-]?\d+$/i.test(compact)) {
     const parsed = Number(compact);
     if (Number.isFinite(parsed)) return Math.trunc(parsed).toString();
   }
@@ -193,53 +200,132 @@ function normalizePhone(value) {
 }
 
 function isValidPhone(phone) {
-  // Aceita padrão internacional sem +, com 10 a 15 dígitos.
+  // Aceita telefone internacional sem +, com 10 a 15 dígitos.
   return /^\d{10,15}$/.test(phone);
 }
 
-function findPhoneColumn(rows) {
-  if (!rows.length) return null;
-  const keys = Object.keys(rows[0]);
+function getCell(sheet, rowIndex, colIndex) {
+  const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+  return sheet[address] || null;
+}
+
+function getCellValue(sheet, rowIndex, colIndex) {
+  const cell = getCell(sheet, rowIndex, colIndex);
+  if (!cell) return '';
+
+  // Para telefone, o valor real da célula é mais confiável do que o texto formatado.
+  if (cell.v !== undefined && cell.v !== null && cell.v !== '') return cell.v;
+  if (cell.w !== undefined && cell.w !== null) return cell.w;
+  return '';
+}
+
+function getHeaders(sheet, range) {
+  const headers = [];
+  for (let col = range.s.c; col <= range.e.c; col += 1) {
+    const header = cellToPlainText(getCellValue(sheet, range.s.r, col));
+    headers[col] = header || `col_${col + 1}`;
+  }
+  return headers;
+}
+
+function findPhoneColumn(headers, range) {
   const aliases = ['telefone', 'whatsapp', 'celular', 'fone', 'numero', 'número', 'phone', 'contato'];
-  return keys.find((key) => aliases.some((alias) => normalizeKey(key).includes(normalizeKey(alias)))) || keys[1] || keys[0];
+
+  for (let col = range.s.c; col <= range.e.c; col += 1) {
+    const key = normalizeKey(headers[col]);
+    if (aliases.some((alias) => key.includes(normalizeKey(alias)))) return col;
+  }
+
+  // Padrão do modelo: coluna B.
+  if (range.e.c >= 1) return 1;
+  return range.s.c;
 }
 
 function parseContacts(filePath) {
-  const workbook = XLSX.readFile(filePath, { raw: true, cellDates: false });
+  const workbook = XLSX.readFile(filePath, { cellDates: false, raw: true });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true }) : [];
-  const phoneColumn = findPhoneColumn(rows);
+
+  if (!sheet || !sheet['!ref']) {
+    return {
+      contacts: [],
+      rejected: [],
+      headers: [],
+      phoneColumn: null,
+      stats: { total: 0, valid: 0, duplicate: 0, invalid: 0 }
+    };
+  }
+
+  const range = XLSX.utils.decode_range(sheet['!ref']);
+  const headers = getHeaders(sheet, range);
+  const phoneColumnIndex = findPhoneColumn(headers, range);
+  const phoneColumn = headers[phoneColumnIndex] || `col_${phoneColumnIndex + 1}`;
   const seen = new Set();
   const contacts = [];
   const rejected = [];
 
-  rows.forEach((row, index) => {
-    const rawPhone = phoneColumn ? row[phoneColumn] : '';
+  for (let rowIndex = range.s.r + 1; rowIndex <= range.e.r; rowIndex += 1) {
+    const row = {};
+    let hasRelevantData = false;
+
+    for (let col = range.s.c; col <= range.e.c; col += 1) {
+      const key = headers[col] || `col_${col + 1}`;
+      const value = getCellValue(sheet, rowIndex, col);
+      const clean = cellToPlainText(value);
+      row[key] = clean;
+      row[normalizeKey(key)] = clean;
+
+      if (clean && col <= Math.max(1, phoneColumnIndex)) {
+        hasRelevantData = true;
+      }
+    }
+
+    const rawPhone = getCellValue(sheet, rowIndex, phoneColumnIndex);
+    const rawPhoneText = cellToPlainText(rawPhone);
     const number = normalizePhone(rawPhone);
-    const line = index + 2;
+    const line = rowIndex + 1;
+
+    if (!rawPhoneText && !hasRelevantData) continue;
 
     if (!isValidPhone(number)) {
-      rejected.push({ line, reason: 'invalid_phone', rawPhone: cellToPlainText(rawPhone), parsedPhone: number });
-      return;
+      rejected.push({
+        line,
+        reason: 'invalid_phone',
+        rawPhone: rawPhoneText,
+        parsedPhone: number,
+        phoneColumn
+      });
+      continue;
     }
 
     if (seen.has(number)) {
-      rejected.push({ line, reason: 'duplicate_phone', rawPhone: cellToPlainText(rawPhone), parsedPhone: number });
-      return;
+      rejected.push({
+        line,
+        reason: 'duplicate_phone',
+        rawPhone: rawPhoneText,
+        parsedPhone: number,
+        phoneColumn
+      });
+      continue;
     }
 
     seen.add(number);
     contacts.push({ line, number, row, status: 'pending', sentAt: null, error: null });
-  });
+  }
 
+  const total = contacts.length + rejected.length;
   return {
     contacts,
     rejected,
+    headers: headers.filter(Boolean),
+    phoneColumn,
     stats: {
-      total: rows.length,
+      total,
       valid: contacts.length,
       duplicate: rejected.filter((item) => item.reason === 'duplicate_phone').length,
-      invalid: rejected.filter((item) => item.reason === 'invalid_phone').length
+      invalid: rejected.filter((item) => item.reason === 'invalid_phone').length,
+      phoneColumn,
+      headers: headers.filter(Boolean),
+      rejectedSamples: rejected.slice(0, 5)
     }
   };
 }
@@ -311,7 +397,7 @@ async function processNext(campaign) {
     contact.status = 'error';
     contact.error = error.response?.data || error.message || 'Erro desconhecido';
     campaign.progress.errors += 1;
-    addActivity(campaign, `Erro ao enviar para ${contact.number}.`, 'error');
+    addActivity(campaign, `Erro ao enviar para ${contact.number}: ${JSON.stringify(contact.error)}`, 'error');
   }
 
   campaign.progress.pending = Math.max(campaign.stats.valid - campaign.progress.sent - campaign.progress.errors, 0);
@@ -327,11 +413,11 @@ async function processNext(campaign) {
 }
 
 app.get('/', (req, res) => {
-  res.json({ ok: true, name: 'Lungo Broadcast API', version: '1.1.0' });
+  res.json({ ok: true, name: 'Lungo Broadcast API', version: VERSION });
 });
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, status: 'online', time: new Date().toISOString() });
+  res.json({ ok: true, status: 'online', version: VERSION, time: new Date().toISOString() });
 });
 
 app.post('/api/instances/validate', async (req, res, next) => {
@@ -371,7 +457,9 @@ app.post('/api/campaigns/start', upload.single('file'), async (req, res, next) =
     await ensureInstanceConnected(instance.instanceName);
 
     const parsed = parseContacts(req.file.path);
-    if (!parsed.contacts.length) throw appError('Nenhum contato válido encontrado na planilha.', 400, parsed.stats);
+    if (!parsed.contacts.length) {
+      throw appError('Nenhum contato válido encontrado na planilha.', 400, parsed.stats);
+    }
 
     const maxContacts = Number(instance.maxContactsPerCampaign || process.env.DEFAULT_MAX_CONTACTS_PER_CAMPAIGN || 5000);
     if (parsed.contacts.length > maxContacts) {
@@ -475,5 +563,5 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Lungo Broadcast API online na porta ${PORT}`);
+  console.log(`Lungo Broadcast API online na porta ${PORT} - v${VERSION}`);
 });
