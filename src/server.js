@@ -29,9 +29,7 @@ const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '*')
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('Origem não permitida pelo CORS.'));
   }
 }));
@@ -73,6 +71,12 @@ function normalizeKey(value) {
     .replace(/^_+|_+$/g, '');
 }
 
+function envTrue(name, defaultValue = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') return defaultValue;
+  return String(value).toLowerCase() === 'true';
+}
+
 function loadInstances() {
   if (!fs.existsSync(INSTANCES_FILE)) return [];
 
@@ -85,9 +89,35 @@ function loadInstances() {
   }
 }
 
+function makeDynamicInstance(userId) {
+  const cleanId = String(userId || '').trim();
+  return {
+    userId: cleanId,
+    instanceName: cleanId,
+    clientName: cleanId,
+    enabled: true,
+    maxContactsPerCampaign: Number(process.env.DEFAULT_MAX_CONTACTS_PER_CAMPAIGN || 5000),
+    minDelayMs: Number(process.env.DEFAULT_MIN_DELAY_MS || 8000),
+    maxDelayMs: Number(process.env.DEFAULT_MAX_DELAY_MS || 25000)
+  };
+}
+
 function findAuthorizedInstance(userId) {
-  const id = normalizeText(userId);
-  return loadInstances().find((item) => normalizeText(item.userId) === id && item.enabled === true);
+  const cleanId = String(userId || '').trim();
+  if (!cleanId) return null;
+
+  const id = normalizeText(cleanId);
+  const mapped = loadInstances().find((item) => normalizeText(item.userId) === id && item.enabled === true);
+  if (mapped) return mapped;
+
+  // Modo principal do produto: qualquer instância existente/conectada na Evolution pode ser usada.
+  // O usuário digita o ID de usuário, e esse ID é tratado como o nome da instância.
+  // Para bloquear esse comportamento, configure ALLOW_DYNAMIC_INSTANCES=false no EasyPanel.
+  if (envTrue('ALLOW_DYNAMIC_INSTANCES', true)) {
+    return makeDynamicInstance(cleanId);
+  }
+
+  return null;
 }
 
 function evolutionBaseUrl() {
@@ -104,8 +134,7 @@ function evolutionHeaders() {
 function buildEvolutionUrl(template, instanceName) {
   const base = evolutionBaseUrl();
   const encoded = encodeURIComponent(instanceName);
-  const pathTemplate = template || '';
-  const endpoint = pathTemplate
+  const endpoint = String(template || '')
     .replace(':instanceName', encoded)
     .replace('{instanceName}', encoded)
     .replace(':instance', encoded)
@@ -121,16 +150,23 @@ function checkEvolutionConfig() {
 async function getConnectionState(instanceName) {
   checkEvolutionConfig();
   const url = buildEvolutionUrl(process.env.EVOLUTION_CONNECTION_PATH || '/instance/connectionState/:instanceName', instanceName);
-  const response = await axios.get(url, { headers: evolutionHeaders(), timeout: 20000 });
-  const body = response.data || {};
-  return body?.instance?.state || body?.state || body?.connectionState || 'unknown';
+
+  try {
+    const response = await axios.get(url, { headers: evolutionHeaders(), timeout: 20000 });
+    const body = response.data || {};
+    return body?.instance?.state || body?.state || body?.connectionState || 'unknown';
+  } catch (error) {
+    throw appError('Instância não encontrada ou não acessível na Evolution API.', error.response?.status || 404, error.response?.data || error.message);
+  }
 }
 
 async function ensureInstanceConnected(instanceName) {
-  if (String(process.env.SKIP_CONNECTION_CHECK || '').toLowerCase() === 'true') return 'skipped';
+  if (envTrue('SKIP_CONNECTION_CHECK', false)) return 'skipped';
+
   const state = await getConnectionState(instanceName);
   const connected = ['open', 'connected', 'online'].includes(String(state).toLowerCase());
-  if (!connected) throw appError(`A instância não está conectada. Estado atual: ${state}.`, 409);
+
+  if (!connected) throw appError(`A instância existe, mas não está conectada. Estado atual: ${state}.`, 409);
   return state;
 }
 
@@ -143,8 +179,13 @@ async function sendText(instanceName, number, text) {
     delay: Number(process.env.EVOLUTION_MESSAGE_DELAY_MS || 0),
     linkPreview: false
   };
-  const response = await axios.post(url, payload, { headers: evolutionHeaders(), timeout: 30000 });
-  return response.data;
+
+  try {
+    const response = await axios.post(url, payload, { headers: evolutionHeaders(), timeout: 30000 });
+    return response.data;
+  } catch (error) {
+    throw appError('Falha ao enviar mensagem pela Evolution API.', error.response?.status || 500, error.response?.data || error.message);
+  }
 }
 
 function normalizePhone(value) {
@@ -250,6 +291,7 @@ async function processNext(campaign) {
   if (campaign.status !== 'running') return;
 
   const contact = campaign.contacts.find((item) => item.status === 'pending');
+
   if (!contact) {
     campaign.status = 'completed';
     campaign.finishedAt = new Date().toISOString();
@@ -263,14 +305,16 @@ async function processNext(campaign) {
   try {
     const text = renderMessage(campaign.message, contact.row, contact.number);
     if (!text) throw new Error('Mensagem vazia após aplicar variáveis.');
+
     await sendText(campaign.instanceName, contact.number, text);
+
     contact.status = 'sent';
     contact.sentAt = new Date().toISOString();
     campaign.progress.sent += 1;
     addActivity(campaign, `Mensagem enviada para ${contact.number}.`);
   } catch (error) {
     contact.status = 'error';
-    contact.error = error.response?.data || error.message || 'Erro desconhecido';
+    contact.error = error.details || error.message || 'Erro desconhecido';
     campaign.progress.errors += 1;
     addActivity(campaign, `Erro ao enviar para ${contact.number}.`, 'error');
   }
@@ -288,11 +332,11 @@ async function processNext(campaign) {
 }
 
 app.get('/', (req, res) => {
-  res.json({ ok: true, name: 'Lungo Broadcast API', version: '1.0.0' });
+  res.json({ ok: true, name: 'Lungo Broadcast API', version: '1.1.0', dynamicInstances: envTrue('ALLOW_DYNAMIC_INSTANCES', true) });
 });
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, status: 'online', time: new Date().toISOString() });
+  res.json({ ok: true, status: 'online', dynamicInstances: envTrue('ALLOW_DYNAMIC_INSTANCES', true), time: new Date().toISOString() });
 });
 
 app.post('/api/instances/validate', async (req, res, next) => {
@@ -307,6 +351,7 @@ app.post('/api/instances/validate', async (req, res, next) => {
     res.json({
       ok: true,
       userId: instance.userId,
+      instanceName: instance.instanceName,
       clientName: instance.clientName,
       state,
       connected: ['open', 'connected', 'online'].includes(String(state).toLowerCase())
@@ -334,9 +379,7 @@ app.post('/api/campaigns/start', upload.single('file'), async (req, res, next) =
     if (!parsed.contacts.length) throw appError('Nenhum contato válido encontrado na planilha.', 400, parsed.stats);
 
     const maxContacts = Number(instance.maxContactsPerCampaign || process.env.DEFAULT_MAX_CONTACTS_PER_CAMPAIGN || 5000);
-    if (parsed.contacts.length > maxContacts) {
-      throw appError(`Campanha acima do limite de ${maxContacts} contatos válidos.`, 413);
-    }
+    if (parsed.contacts.length > maxContacts) throw appError(`Campanha acima do limite de ${maxContacts} contatos válidos.`, 413);
 
     const campaign = {
       id: crypto.randomUUID(),
@@ -360,7 +403,7 @@ app.post('/api/campaigns/start', upload.single('file'), async (req, res, next) =
     };
 
     addActivity(campaign, 'Campanha criada.');
-    addActivity(campaign, 'Instância autorizada e conectada.');
+    addActivity(campaign, `Instância ${campaign.instanceName} validada e conectada.`);
     campaigns.set(campaign.id, campaign);
     processNext(campaign);
 
@@ -402,9 +445,7 @@ app.get('/api/campaigns/:id/report.csv', (req, res, next) => {
     const campaign = campaigns.get(req.params.id);
     if (!campaign) throw appError('Campanha não encontrada.', 404);
 
-    const rows = [[
-      'campaign_id', 'client_name', 'user_id', 'instance_name', 'number', 'status', 'sent_at', 'error', 'line'
-    ]];
+    const rows = [['campaign_id', 'client_name', 'user_id', 'instance_name', 'number', 'status', 'sent_at', 'error', 'line']];
 
     campaign.contacts.forEach((contact) => rows.push([
       campaign.id, campaign.clientName, campaign.userId, campaign.instanceName,
@@ -430,7 +471,7 @@ app.use((req, res) => {
 });
 
 app.use((error, req, res, next) => {
-  console.error('[ERROR]', error.response?.data || error.message || error);
+  console.error('[ERROR]', error.details || error.response?.data || error.message || error);
   res.status(error.statusCode || error.response?.status || 500).json({
     ok: false,
     error: error.message || 'Erro interno no servidor.',
@@ -440,4 +481,5 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Lungo Broadcast API online na porta ${PORT}`);
+  console.log(`Instâncias dinâmicas: ${envTrue('ALLOW_DYNAMIC_INSTANCES', true) ? 'ativas' : 'desativadas'}`);
 });
