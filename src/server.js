@@ -12,7 +12,7 @@ dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const ROOT = path.resolve(__dirname, '..');
 const UPLOAD_DIR = path.join(ROOT, 'storage', 'uploads');
 const INSTANCES_FILE = path.join(ROOT, 'data', 'instances.json');
@@ -20,7 +20,6 @@ const INSTANCES_FILE = path.join(ROOT, 'data', 'instances.json');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 app.disable('x-powered-by');
 
-// CORS liberado para testes de integração frontend/backend.
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.header('Vary', 'Origin');
@@ -151,12 +150,15 @@ async function ensureInstanceConnected(instanceName) {
 async function sendText(instanceName, number, text) {
   checkEvolutionConfig();
   const url = buildEvolutionUrl(process.env.EVOLUTION_SEND_TEXT_PATH || '/message/sendText/:instanceName', instanceName);
+
+  // Evolution API neste servidor exige a propriedade raiz "text".
   const payload = {
-    number,
-    textMessage: { text },
+    number: String(number),
+    text: String(text),
     delay: Number(process.env.EVOLUTION_MESSAGE_DELAY_MS || 0),
     linkPreview: false
   };
+
   const response = await axios.post(url, payload, { headers: evolutionHeaders(), timeout: 30000 });
   return response.data;
 }
@@ -171,12 +173,9 @@ function cellToPlainText(value) {
   let text = String(value).trim().replace(/\u00A0/g, ' ');
   if (text.startsWith("'")) text = text.slice(1);
 
-  // Corrige textos como 5531999999999.0
   if (/^\d+\.0+$/.test(text)) return text.replace(/\.0+$/, '');
 
   const compact = text.replace(/\s/g, '').replace(',', '.');
-
-  // Corrige notação científica, ex.: 5.532E+12
   if (/^\d+(\.\d+)?e[+-]?\d+$/i.test(compact)) {
     const parsed = Number(compact);
     if (Number.isFinite(parsed)) return Math.trunc(parsed).toString();
@@ -191,7 +190,6 @@ function normalizePhone(value) {
 
   if (digits.startsWith('00')) digits = digits.slice(2);
 
-  // Brasil: DDD + número sem DDI.
   if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) {
     digits = `55${digits}`;
   }
@@ -200,7 +198,6 @@ function normalizePhone(value) {
 }
 
 function isValidPhone(phone) {
-  // Aceita telefone internacional sem +, com 10 a 15 dígitos.
   return /^\d{10,15}$/.test(phone);
 }
 
@@ -212,8 +209,6 @@ function getCell(sheet, rowIndex, colIndex) {
 function getCellValue(sheet, rowIndex, colIndex) {
   const cell = getCell(sheet, rowIndex, colIndex);
   if (!cell) return '';
-
-  // Para telefone, o valor real da célula é mais confiável do que o texto formatado.
   if (cell.v !== undefined && cell.v !== null && cell.v !== '') return cell.v;
   if (cell.w !== undefined && cell.w !== null) return cell.w;
   return '';
@@ -236,7 +231,6 @@ function findPhoneColumn(headers, range) {
     if (aliases.some((alias) => key.includes(normalizeKey(alias)))) return col;
   }
 
-  // Padrão do modelo: coluna B.
   if (range.e.c >= 1) return 1;
   return range.s.c;
 }
@@ -367,7 +361,7 @@ function publicCampaign(campaign) {
     stoppedAt: campaign.stoppedAt,
     stats: campaign.stats,
     progress: campaign.progress,
-    activity: campaign.activity.slice(-40).reverse()
+    activity: campaign.activity.slice(-50).reverse()
   };
 }
 
@@ -388,7 +382,9 @@ async function processNext(campaign) {
   try {
     const text = renderMessage(campaign.message, contact.row, contact.number);
     if (!text) throw new Error('Mensagem vazia após aplicar variáveis.');
+
     await sendText(campaign.instanceName, contact.number, text);
+
     contact.status = 'sent';
     contact.sentAt = new Date().toISOString();
     campaign.progress.sent += 1;
@@ -457,9 +453,7 @@ app.post('/api/campaigns/start', upload.single('file'), async (req, res, next) =
     await ensureInstanceConnected(instance.instanceName);
 
     const parsed = parseContacts(req.file.path);
-    if (!parsed.contacts.length) {
-      throw appError('Nenhum contato válido encontrado na planilha.', 400, parsed.stats);
-    }
+    if (!parsed.contacts.length) throw appError('Nenhum contato válido encontrado na planilha.', 400, parsed.stats);
 
     const maxContacts = Number(instance.maxContactsPerCampaign || process.env.DEFAULT_MAX_CONTACTS_PER_CAMPAIGN || 5000);
     if (parsed.contacts.length > maxContacts) {
@@ -563,5 +557,5 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Lungo Broadcast API online na porta ${PORT} - v${VERSION}`);
+  console.log(`Lungo Broadcast API ${VERSION} online na porta ${PORT}`);
 });
