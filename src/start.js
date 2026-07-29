@@ -1,5 +1,5 @@
 // Lungo Broadcast startup wrapper.
-// Keeps the existing campaign backend and adds token-based onboarding routes.
+// Keeps the campaign backend and adds token-based onboarding/admin routes.
 
 process.env.ALLOWED_ORIGINS = '*';
 
@@ -7,12 +7,20 @@ const realExpress = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-let onboardingRegistered = false;
+let extraRoutesRegistered = false;
 
 const ROOT = path.resolve(__dirname, '..');
-const CLIENTS_FILE = path.join(ROOT, 'data', 'clientes.json');
-const VERSION = '1.4.0';
+const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
+const VERSION = '1.5.0';
+
+function appError(message, statusCode = 400, details = null) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.details = details;
+  return error;
+}
 
 function cleanToken(value) {
   return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
@@ -53,18 +61,82 @@ function loadClients() {
   }
 }
 
+function saveClients(clients) {
+  fs.mkdirSync(path.dirname(CLIENTS_FILE), { recursive: true });
+  fs.writeFileSync(CLIENTS_FILE, `${JSON.stringify(clients, null, 2)}\n`, 'utf8');
+}
+
 function findClientByToken(token) {
   const clean = cleanToken(token);
   if (!clean) return null;
   return loadClients().find((item) => cleanToken(item.token) === clean && item.ativo !== false) || null;
 }
 
-function publicClient(client) {
-  return {
+function publicClient(client, includeToken = false) {
+  const output = {
     nome: client.nome || client.instanceName,
     instanceName: client.instanceName,
-    ativo: client.ativo !== false
+    ativo: client.ativo !== false,
+    whatsapp: client.whatsapp || '',
+    createdAt: client.createdAt || null,
+    updatedAt: client.updatedAt || null
   };
+  if (includeToken) output.token = client.token;
+  return output;
+}
+
+function slugify(value) {
+  const clean = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32);
+  return clean || 'cliente';
+}
+
+function randomCode(size = 4) {
+  return crypto.randomBytes(size).toString('hex').toUpperCase();
+}
+
+function generateToken(nome, clients) {
+  const prefix = slugify(nome).replace(/_/g, '').toUpperCase().slice(0, 8) || 'CLIENTE';
+  let token;
+  do {
+    token = `${prefix}-${randomCode(2)}-${randomCode(2)}`;
+  } while (clients.some((item) => cleanToken(item.token) === cleanToken(token)));
+  return token;
+}
+
+function generateInstanceName(nome, clients) {
+  const base = `lungo_${slugify(nome)}`.slice(0, 42);
+  let instanceName = `${base}_${randomCode(2).toLowerCase()}`;
+  while (clients.some((item) => String(item.instanceName || '').toLowerCase() === instanceName.toLowerCase())) {
+    instanceName = `${base}_${randomCode(2).toLowerCase()}`;
+  }
+  return instanceName;
+}
+
+function getAdminSecret() {
+  return process.env.ADMIN_ACCESS_KEY || process.env.ADMIN_KEY || '';
+}
+
+function getAdminKeyFromRequest(req) {
+  const bodyKey = req.body?.adminKey;
+  const headerKey = req.headers['x-admin-key'];
+  const auth = req.headers.authorization || '';
+  if (bodyKey) return String(bodyKey);
+  if (headerKey) return String(headerKey);
+  if (String(auth).toLowerCase().startsWith('bearer ')) return String(auth).slice(7);
+  return String(auth || '');
+}
+
+function requireAdmin(req) {
+  const secret = getAdminSecret();
+  if (!secret) throw appError('ADMIN_ACCESS_KEY não configurada no backend.', 500);
+  const provided = getAdminKeyFromRequest(req);
+  if (!provided || provided !== secret) throw appError('Chave administrativa inválida.', 401);
 }
 
 function evolutionBaseUrl() {
@@ -90,8 +162,8 @@ function buildEvolutionUrl(template, instanceName) {
 }
 
 function ensureEvolutionConfig() {
-  if (!evolutionBaseUrl()) throw new Error('EVOLUTION_BASE_URL não configurado.');
-  if (!process.env.EVOLUTION_API_KEY) throw new Error('EVOLUTION_API_KEY não configurado.');
+  if (!evolutionBaseUrl()) throw appError('EVOLUTION_BASE_URL não configurado.', 500);
+  if (!process.env.EVOLUTION_API_KEY) throw appError('EVOLUTION_API_KEY não configurado.', 500);
 }
 
 function isConnectedState(state) {
@@ -197,11 +269,7 @@ async function connectEvolutionInstance(instanceName) {
 
 async function prepareConnection(client, number) {
   const instanceName = cleanInstanceName(client.instanceName);
-  if (!instanceName) {
-    const error = new Error('Cliente sem instanceName configurado em data/clientes.json.');
-    error.statusCode = 500;
-    throw error;
-  }
+  if (!instanceName) throw appError('Cliente sem instanceName configurado.', 500);
 
   let createResponse = null;
   let state = await getSafeConnectionState(instanceName);
@@ -226,26 +294,23 @@ async function prepareConnection(client, number) {
   return { instanceName, state: updatedState, connected: isConnectedState(updatedState), qr };
 }
 
-function sendRouteError(res, error) {
-  console.error('[ONBOARDING ERROR]', error.response?.data || error.message || error);
+function sendRouteError(res, error, label = 'ERROR') {
+  console.error(`[${label}]`, error.response?.data || error.message || error);
   res.status(error.statusCode || error.response?.status || 500).json({
     ok: false,
     error: error.message || 'Erro interno no servidor.',
-    details: error.response?.data || null
+    details: error.details || error.response?.data || null
   });
 }
 
 function registerOnboardingRoutes(app) {
-  if (onboardingRegistered) return;
-  onboardingRegistered = true;
-
   app.post('/api/onboarding/check-token', (req, res) => {
     try {
       const client = findClientByToken(req.body.token);
       if (!client) return res.status(403).json({ ok: false, error: 'Token inválido ou inativo.' });
       res.json({ ok: true, client: publicClient(client) });
     } catch (error) {
-      sendRouteError(res, error);
+      sendRouteError(res, error, 'ONBOARDING ERROR');
     }
   });
 
@@ -267,7 +332,7 @@ function registerOnboardingRoutes(app) {
         count: result.qr?.count ?? null
       });
     } catch (error) {
-      sendRouteError(res, error);
+      sendRouteError(res, error, 'ONBOARDING ERROR');
     }
   });
 
@@ -285,13 +350,113 @@ function registerOnboardingRoutes(app) {
         connected: isConnectedState(state)
       });
     } catch (error) {
-      sendRouteError(res, error);
+      sendRouteError(res, error, 'ONBOARDING ERROR');
     }
   });
 
   app.get('/api/onboarding/health', (req, res) => {
     res.json({ ok: true, status: 'online', version: VERSION, module: 'onboarding', time: new Date().toISOString() });
   });
+}
+
+function registerAdminRoutes(app) {
+  app.get('/api/admin/health', (req, res) => {
+    res.json({ ok: true, status: 'online', version: VERSION, module: 'admin', adminConfigured: Boolean(getAdminSecret()), time: new Date().toISOString() });
+  });
+
+  app.get('/api/admin/clients', (req, res) => {
+    try {
+      requireAdmin(req);
+      const clients = loadClients().map((client) => publicClient(client, true));
+      res.json({ ok: true, clients, count: clients.length });
+    } catch (error) {
+      sendRouteError(res, error, 'ADMIN ERROR');
+    }
+  });
+
+  app.post('/api/admin/clients/list', (req, res) => {
+    try {
+      requireAdmin(req);
+      const clients = loadClients().map((client) => publicClient(client, true));
+      res.json({ ok: true, clients, count: clients.length });
+    } catch (error) {
+      sendRouteError(res, error, 'ADMIN ERROR');
+    }
+  });
+
+  app.post('/api/admin/clients', (req, res) => {
+    try {
+      requireAdmin(req);
+      const nome = String(req.body.nome || '').trim();
+      const whatsapp = normalizePhone(req.body.whatsapp || '');
+      const requestedToken = cleanToken(req.body.token || '');
+      const requestedInstance = cleanInstanceName(req.body.instanceName || '');
+
+      if (nome.length < 2) throw appError('Informe o nome do cliente.', 400);
+
+      const clients = loadClients();
+      const token = requestedToken || generateToken(nome, clients);
+      const instanceName = requestedInstance || generateInstanceName(nome, clients);
+
+      if (clients.some((item) => cleanToken(item.token) === cleanToken(token))) {
+        throw appError('Já existe um cliente com esse token.', 409);
+      }
+
+      if (clients.some((item) => String(item.instanceName || '').toLowerCase() === instanceName.toLowerCase())) {
+        throw appError('Já existe um cliente com esse ID/instância.', 409);
+      }
+
+      const now = new Date().toISOString();
+      const client = { nome, token, instanceName, ativo: true, whatsapp, createdAt: now, updatedAt: now };
+      clients.push(client);
+      saveClients(clients);
+
+      res.status(201).json({ ok: true, client: publicClient(client, true) });
+    } catch (error) {
+      sendRouteError(res, error, 'ADMIN ERROR');
+    }
+  });
+
+  app.patch('/api/admin/clients/:token', (req, res) => {
+    try {
+      requireAdmin(req);
+      const token = cleanToken(req.params.token);
+      const clients = loadClients();
+      const index = clients.findIndex((item) => cleanToken(item.token) === token);
+      if (index < 0) throw appError('Cliente não encontrado.', 404);
+
+      if (req.body.nome !== undefined) clients[index].nome = String(req.body.nome || '').trim();
+      if (req.body.whatsapp !== undefined) clients[index].whatsapp = normalizePhone(req.body.whatsapp || '');
+      if (req.body.ativo !== undefined) clients[index].ativo = Boolean(req.body.ativo);
+      clients[index].updatedAt = new Date().toISOString();
+
+      saveClients(clients);
+      res.json({ ok: true, client: publicClient(clients[index], true) });
+    } catch (error) {
+      sendRouteError(res, error, 'ADMIN ERROR');
+    }
+  });
+
+  app.delete('/api/admin/clients/:token', (req, res) => {
+    try {
+      requireAdmin(req);
+      const token = cleanToken(req.params.token);
+      const clients = loadClients();
+      const filtered = clients.filter((item) => cleanToken(item.token) !== token);
+      if (filtered.length === clients.length) throw appError('Cliente não encontrado.', 404);
+      saveClients(filtered);
+      res.json({ ok: true, removed: true });
+    } catch (error) {
+      sendRouteError(res, error, 'ADMIN ERROR');
+    }
+  });
+}
+
+function registerExtraRoutes(app) {
+  if (extraRoutesRegistered) return;
+  extraRoutesRegistered = true;
+  registerOnboardingRoutes(app);
+  registerAdminRoutes(app);
 }
 
 function wrapApp(app) {
@@ -301,13 +466,13 @@ function wrapApp(app) {
   app.get = function patchedGet(routePath, ...handlers) {
     if (routePath === '/health') {
       return originalGet(routePath, (req, res) => {
-        res.json({ ok: true, status: 'online', version: VERSION, onboarding: true, time: new Date().toISOString() });
+        res.json({ ok: true, status: 'online', version: VERSION, onboarding: true, admin: true, time: new Date().toISOString() });
       });
     }
 
     if (routePath === '/') {
       return originalGet(routePath, (req, res) => {
-        res.json({ ok: true, name: 'Lungo Broadcast API', version: VERSION, onboarding: true });
+        res.json({ ok: true, name: 'Lungo Broadcast API', version: VERSION, onboarding: true, admin: true });
       });
     }
 
@@ -316,8 +481,8 @@ function wrapApp(app) {
 
   app.use = function patchedUse(...args) {
     const first = args[0];
-    if (!onboardingRegistered && typeof first === 'function' && (first.length === 2 || first.length === 4)) {
-      registerOnboardingRoutes(app);
+    if (!extraRoutesRegistered && typeof first === 'function' && (first.length === 2 || first.length === 4)) {
+      registerExtraRoutes(app);
     }
     return originalUse(...args);
   };
