@@ -1,5 +1,5 @@
 // Lungo Broadcast startup wrapper.
-// Keeps the campaign backend and adds token-based onboarding/admin routes.
+// Keeps the campaign backend and adds token-based onboarding/admin/CRM routes.
 
 process.env.ALLOWED_ORIGINS = '*';
 
@@ -13,7 +13,17 @@ let extraRoutesRegistered = false;
 
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
-const VERSION = '1.5.0';
+const LEADS_FILE = process.env.LEADS_FILE_PATH || path.join(ROOT, 'data', 'leads.json');
+const VERSION = '1.6.0';
+
+const CRM_STATUS_LABELS = {
+  novo_lead: 'Novo lead',
+  em_atendimento: 'Em atendimento',
+  cotacao_enviada: 'Cotação enviada',
+  aguardando_retorno: 'Aguardando retorno',
+  fechado: 'Fechado',
+  perdido: 'Perdido'
+};
 
 function appError(message, statusCode = 400, details = null) {
   const error = new Error(message);
@@ -66,10 +76,44 @@ function saveClients(clients) {
   fs.writeFileSync(CLIENTS_FILE, `${JSON.stringify(clients, null, 2)}\n`, 'utf8');
 }
 
+function loadLeads() {
+  if (!fs.existsSync(LEADS_FILE)) return [];
+  try {
+    const data = JSON.parse(fs.readFileSync(LEADS_FILE, 'utf8'));
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLeads(leads) {
+  fs.mkdirSync(path.dirname(LEADS_FILE), { recursive: true });
+  fs.writeFileSync(LEADS_FILE, `${JSON.stringify(leads, null, 2)}\n`, 'utf8');
+}
+
 function findClientByToken(token) {
   const clean = cleanToken(token);
   if (!clean) return null;
   return loadClients().find((item) => cleanToken(item.token) === clean && item.ativo !== false) || null;
+}
+
+function getClientTokenFromRequest(req) {
+  const bodyToken = req.body?.token;
+  const queryToken = req.query?.token;
+  const headerToken = req.headers['x-client-token'];
+  const auth = req.headers.authorization || '';
+  if (bodyToken) return String(bodyToken);
+  if (queryToken) return String(queryToken);
+  if (headerToken) return String(headerToken);
+  if (String(auth).toLowerCase().startsWith('bearer ')) return String(auth).slice(7);
+  return '';
+}
+
+function requireClientByToken(req) {
+  const client = findClientByToken(getClientTokenFromRequest(req));
+  if (!client) throw appError('Token inválido ou inativo.', 403);
+  if (!cleanInstanceName(client.instanceName)) throw appError('Cliente sem instanceName configurado.', 500);
+  return client;
 }
 
 function publicClient(client, includeToken = false) {
@@ -100,6 +144,10 @@ function randomCode(size = 4) {
   return crypto.randomBytes(size).toString('hex').toUpperCase();
 }
 
+function generateId(prefix = 'id') {
+  return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
+}
+
 function generateToken(nome, clients) {
   const prefix = slugify(nome).replace(/_/g, '').toUpperCase().slice(0, 8) || 'CLIENTE';
   let token;
@@ -116,6 +164,115 @@ function generateInstanceName(nome, clients) {
     instanceName = `${base}_${randomCode(2).toLowerCase()}`;
   }
   return instanceName;
+}
+
+function normalizeLeadStatus(value) {
+  const raw = slugify(value || 'novo_lead');
+  const aliases = {
+    novo: 'novo_lead',
+    novo_lead: 'novo_lead',
+    lead: 'novo_lead',
+    em_atendimento: 'em_atendimento',
+    atendimento: 'em_atendimento',
+    cotacao: 'cotacao_enviada',
+    cotacao_enviada: 'cotacao_enviada',
+    proposta: 'cotacao_enviada',
+    proposta_enviada: 'cotacao_enviada',
+    aguardando: 'aguardando_retorno',
+    aguardando_retorno: 'aguardando_retorno',
+    retorno: 'aguardando_retorno',
+    follow_up: 'aguardando_retorno',
+    fechado: 'fechado',
+    venda: 'fechado',
+    vendido: 'fechado',
+    perdido: 'perdido',
+    cancelado: 'perdido'
+  };
+  return aliases[raw] || (CRM_STATUS_LABELS[raw] ? raw : 'novo_lead');
+}
+
+function normalizeTags(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 8);
+  }
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function publicLead(lead) {
+  const status = normalizeLeadStatus(lead.status);
+  return {
+    id: lead.id,
+    nome: lead.nome || '',
+    telefone: lead.telefone || '',
+    status,
+    statusLabel: CRM_STATUS_LABELS[status] || status,
+    origem: lead.origem || 'Manual',
+    observacao: lead.observacao || '',
+    proximoRetorno: lead.proximoRetorno || '',
+    cidade: lead.cidade || '',
+    planoAtual: lead.planoAtual || '',
+    valor: lead.valor || '',
+    tags: Array.isArray(lead.tags) ? lead.tags : [],
+    createdAt: lead.createdAt || null,
+    updatedAt: lead.updatedAt || null
+  };
+}
+
+function leadSearchText(lead) {
+  return [
+    lead.nome,
+    lead.telefone,
+    lead.status,
+    lead.origem,
+    lead.observacao,
+    lead.cidade,
+    lead.planoAtual,
+    lead.valor,
+    ...(Array.isArray(lead.tags) ? lead.tags : [])
+  ].join(' ').toLowerCase();
+}
+
+function summarizeLeads(leads) {
+  const summary = Object.fromEntries(Object.keys(CRM_STATUS_LABELS).map((status) => [status, 0]));
+  leads.forEach((lead) => {
+    const status = normalizeLeadStatus(lead.status);
+    summary[status] = (summary[status] || 0) + 1;
+  });
+  return {
+    total: leads.length,
+    ...summary
+  };
+}
+
+function buildLeadPayload(body, client, existing = {}) {
+  const nome = body.nome !== undefined ? String(body.nome || '').trim() : existing.nome || '';
+  const telefone = body.telefone !== undefined ? normalizePhone(body.telefone || '') : existing.telefone || '';
+
+  if (!nome || nome.length < 2) throw appError('Informe o nome do lead.', 400);
+  if (!telefone || telefone.length < 10) throw appError('Informe um WhatsApp válido para o lead.', 400);
+
+  const now = new Date().toISOString();
+  return {
+    ...existing,
+    id: existing.id || generateId('lead'),
+    instanceName: client.instanceName,
+    nome,
+    telefone,
+    status: body.status !== undefined ? normalizeLeadStatus(body.status) : normalizeLeadStatus(existing.status),
+    origem: body.origem !== undefined ? String(body.origem || 'Manual').trim() || 'Manual' : existing.origem || 'Manual',
+    observacao: body.observacao !== undefined ? String(body.observacao || '').trim() : existing.observacao || '',
+    proximoRetorno: body.proximoRetorno !== undefined ? String(body.proximoRetorno || '').trim() : existing.proximoRetorno || '',
+    cidade: body.cidade !== undefined ? String(body.cidade || '').trim() : existing.cidade || '',
+    planoAtual: body.planoAtual !== undefined ? String(body.planoAtual || '').trim() : existing.planoAtual || '',
+    valor: body.valor !== undefined ? String(body.valor || '').trim() : existing.valor || '',
+    tags: body.tags !== undefined ? normalizeTags(body.tags) : Array.isArray(existing.tags) ? existing.tags : [],
+    createdAt: existing.createdAt || now,
+    updatedAt: now
+  };
 }
 
 function getAdminSecret() {
@@ -359,6 +516,84 @@ function registerOnboardingRoutes(app) {
   });
 }
 
+function registerCrmRoutes(app) {
+  app.get('/api/crm/health', (req, res) => {
+    res.json({ ok: true, status: 'online', version: VERSION, module: 'crm', time: new Date().toISOString() });
+  });
+
+  app.get('/api/crm/statuses', (req, res) => {
+    res.json({
+      ok: true,
+      statuses: Object.entries(CRM_STATUS_LABELS).map(([value, label]) => ({ value, label }))
+    });
+  });
+
+  app.get('/api/crm/leads', (req, res) => {
+    try {
+      const client = requireClientByToken(req);
+      const instanceName = cleanInstanceName(client.instanceName);
+      const statusFilter = req.query?.status ? normalizeLeadStatus(req.query.status) : '';
+      const query = String(req.query?.q || req.query?.search || '').trim().toLowerCase();
+
+      let leads = loadLeads().filter((lead) => cleanInstanceName(lead.instanceName) === instanceName);
+
+      if (statusFilter) leads = leads.filter((lead) => normalizeLeadStatus(lead.status) === statusFilter);
+      if (query) leads = leads.filter((lead) => leadSearchText(lead).includes(query));
+
+      const sorted = leads.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+      res.json({ ok: true, client: publicClient(client), leads: sorted.map(publicLead), summary: summarizeLeads(leads) });
+    } catch (error) {
+      sendRouteError(res, error, 'CRM ERROR');
+    }
+  });
+
+  app.post('/api/crm/leads', (req, res) => {
+    try {
+      const client = requireClientByToken(req);
+      const leads = loadLeads();
+      const lead = buildLeadPayload(req.body || {}, client);
+      leads.push(lead);
+      saveLeads(leads);
+      res.status(201).json({ ok: true, lead: publicLead(lead), summary: summarizeLeads(leads.filter((item) => cleanInstanceName(item.instanceName) === cleanInstanceName(client.instanceName))) });
+    } catch (error) {
+      sendRouteError(res, error, 'CRM ERROR');
+    }
+  });
+
+  const updateLeadHandler = (req, res) => {
+    try {
+      const client = requireClientByToken(req);
+      const leads = loadLeads();
+      const id = String(req.params.id || '').trim();
+      const index = leads.findIndex((lead) => lead.id === id && cleanInstanceName(lead.instanceName) === cleanInstanceName(client.instanceName));
+      if (index < 0) throw appError('Lead não encontrado para este cliente.', 404);
+
+      leads[index] = buildLeadPayload(req.body || {}, client, leads[index]);
+      saveLeads(leads);
+      res.json({ ok: true, lead: publicLead(leads[index]), summary: summarizeLeads(leads.filter((item) => cleanInstanceName(item.instanceName) === cleanInstanceName(client.instanceName))) });
+    } catch (error) {
+      sendRouteError(res, error, 'CRM ERROR');
+    }
+  };
+
+  app.put('/api/crm/leads/:id', updateLeadHandler);
+  app.patch('/api/crm/leads/:id', updateLeadHandler);
+
+  app.delete('/api/crm/leads/:id', (req, res) => {
+    try {
+      const client = requireClientByToken(req);
+      const id = String(req.params.id || '').trim();
+      const leads = loadLeads();
+      const filtered = leads.filter((lead) => !(lead.id === id && cleanInstanceName(lead.instanceName) === cleanInstanceName(client.instanceName)));
+      if (filtered.length === leads.length) throw appError('Lead não encontrado para este cliente.', 404);
+      saveLeads(filtered);
+      res.json({ ok: true, removed: true, summary: summarizeLeads(filtered.filter((item) => cleanInstanceName(item.instanceName) === cleanInstanceName(client.instanceName))) });
+    } catch (error) {
+      sendRouteError(res, error, 'CRM ERROR');
+    }
+  });
+}
+
 function registerAdminRoutes(app) {
   app.get('/api/admin/health', (req, res) => {
     res.json({ ok: true, status: 'online', version: VERSION, module: 'admin', adminConfigured: Boolean(getAdminSecret()), time: new Date().toISOString() });
@@ -456,6 +691,7 @@ function registerExtraRoutes(app) {
   if (extraRoutesRegistered) return;
   extraRoutesRegistered = true;
   registerOnboardingRoutes(app);
+  registerCrmRoutes(app);
   registerAdminRoutes(app);
 }
 
@@ -466,13 +702,13 @@ function wrapApp(app) {
   app.get = function patchedGet(routePath, ...handlers) {
     if (routePath === '/health') {
       return originalGet(routePath, (req, res) => {
-        res.json({ ok: true, status: 'online', version: VERSION, onboarding: true, admin: true, time: new Date().toISOString() });
+        res.json({ ok: true, status: 'online', version: VERSION, onboarding: true, admin: true, crm: true, time: new Date().toISOString() });
       });
     }
 
     if (routePath === '/') {
       return originalGet(routePath, (req, res) => {
-        res.json({ ok: true, name: 'Lungo Broadcast API', version: VERSION, onboarding: true, admin: true });
+        res.json({ ok: true, name: 'Lungo Broadcast API', version: VERSION, onboarding: true, admin: true, crm: true });
       });
     }
 
