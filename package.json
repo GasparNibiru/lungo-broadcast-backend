@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node -r ./src/crm-sync-routes.js src/start.js",
+    "start": "node -r ./src/crm-sync-routes.js -r ./src/crm-sync-browser-get.js src/start.js",
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
