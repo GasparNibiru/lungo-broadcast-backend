@@ -1,0 +1,9 @@
+[
+  {
+    "nome": "Cliente Teste",
+    "token": "TESTE123",
+    "instanceName": "cliente_teste",
+    "ativo": true,
+    "whatsapp": ""
+  }
+]
