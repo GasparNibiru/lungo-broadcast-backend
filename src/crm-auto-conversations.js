@@ -8,7 +8,7 @@ const axios = require('axios');
 const realExpress = require('express');
 
 let registered = false;
-const VERSION = '1.9.0-auto-conversations';
+const VERSION = '2.0.0-auto-crm-pipeline';
 
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
@@ -17,15 +17,27 @@ const AUTO_LOG_FILE = process.env.CRM_AUTO_CONVERSATION_LOG_FILE || path.join(RO
 const PUBLIC_BACKEND_URL = String(process.env.PUBLIC_BACKEND_URL || process.env.API_PUBLIC_URL || 'https://lungo-disparos-app.dzpywk.easypanel.host').replace(/\/+$/, '');
 
 const STATUS_LABELS = {
-  conversa_recente: 'Conversa recente',
-  novo_lead: 'Novo lead',
+  novo: 'Novos',
   em_atendimento: 'Em atendimento',
   cotacao_enviada: 'Cotação enviada',
-  aguardando_retorno: 'Aguardando retorno',
-  fechado: 'Fechado',
-  perdido: 'Perdido',
+  documentacao_recebida: 'Documentação recebida',
+  venda_cadastrada: 'Venda cadastrada',
+  boleto_gerado: 'Boleto gerado',
+  fechamento: 'Fechamento',
+  venda_perdida: 'Venda perdida',
   arquivado: 'Arquivado'
 };
+
+const PIPELINE_STATUSES = [
+  'novo',
+  'em_atendimento',
+  'cotacao_enviada',
+  'documentacao_recebida',
+  'venda_cadastrada',
+  'boleto_gerado',
+  'fechamento',
+  'venda_perdida'
+];
 
 const DEFAULT_AUTO_EVENTS = [
   'MESSAGES_UPSERT',
@@ -67,7 +79,15 @@ function slugify(value) {
 function cellToPlainText(value) {
   if (value === null || value === undefined) return '';
   if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value).toString();
-  return String(value).trim();
+  let text = String(value).trim().replace(/\u00A0/g, ' ');
+  if (text.startsWith("'")) text = text.slice(1);
+  if (/^\d+\.0+$/.test(text)) return text.replace(/\.0+$/, '');
+  const compact = text.replace(/\s/g, '').replace(',', '.');
+  if (/^\d+(\.\d+)?e[+-]?\d+$/i.test(compact)) {
+    const parsed = Number(compact);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed).toString();
+  }
+  return text;
 }
 
 function normalizePhone(value) {
@@ -75,6 +95,12 @@ function normalizePhone(value) {
   if (digits.startsWith('00')) digits = digits.slice(2);
   if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) digits = `55${digits}`;
   return digits;
+}
+
+function moneyText(value) {
+  const text = clean(value);
+  if (!text) return '';
+  return text;
 }
 
 function generateId(prefix = 'id') {
@@ -340,47 +366,61 @@ function extractMessageText(body) {
 }
 
 function normalizeStatus(value) {
-  const raw = slugify(value || 'conversa_recente');
+  const raw = slugify(value || 'novo');
   const aliases = {
-    conversa: 'conversa_recente',
-    conversas: 'conversa_recente',
-    conversa_recente: 'conversa_recente',
-    recente: 'conversa_recente',
-    novo: 'novo_lead',
-    novo_lead: 'novo_lead',
-    lead: 'novo_lead',
+    conversa: 'novo',
+    conversas: 'novo',
+    conversa_recente: 'novo',
+    recente: 'novo',
+    novo: 'novo',
+    novos: 'novo',
+    novo_lead: 'novo',
+    lead: 'novo',
     em_atendimento: 'em_atendimento',
     atendimento: 'em_atendimento',
     cotacao: 'cotacao_enviada',
     cotacao_enviada: 'cotacao_enviada',
     proposta: 'cotacao_enviada',
     proposta_enviada: 'cotacao_enviada',
-    aguardando: 'aguardando_retorno',
-    aguardando_retorno: 'aguardando_retorno',
-    retorno: 'aguardando_retorno',
-    follow_up: 'aguardando_retorno',
-    fechado: 'fechado',
-    venda: 'fechado',
-    vendido: 'fechado',
-    perdido: 'perdido',
-    cancelado: 'perdido',
+    documentacao: 'documentacao_recebida',
+    documentacao_recebida: 'documentacao_recebida',
+    documentos: 'documentacao_recebida',
+    docs: 'documentacao_recebida',
+    venda_cadastrada: 'venda_cadastrada',
+    cadastro: 'venda_cadastrada',
+    cadastrado: 'venda_cadastrada',
+    boleto: 'boleto_gerado',
+    boleto_gerado: 'boleto_gerado',
+    fechamento: 'fechamento',
+    fechado: 'fechamento',
+    venda: 'fechamento',
+    vendido: 'fechamento',
+    perdido: 'venda_perdida',
+    venda_perdida: 'venda_perdida',
+    cancelado: 'venda_perdida',
     arquivado: 'arquivado',
     arquivo: 'arquivado',
     oculto: 'arquivado'
   };
-  return aliases[raw] || (STATUS_LABELS[raw] ? raw : 'conversa_recente');
+  return aliases[raw] || (STATUS_LABELS[raw] ? raw : 'novo');
 }
 
 function leadSearchText(lead) {
   return [
     lead.nome,
     lead.telefone,
+    lead.email,
+    lead.pessoaTipo,
+    lead.cnpjOuPf,
     lead.status,
     lead.origem,
     lead.observacao,
     lead.cidade,
     lead.planoAtual,
+    lead.planoInteresse,
     lead.valor,
+    lead.valorNegocio,
+    lead.qtdVidas,
     lead.lastMessage,
     lead.whatsappJid,
     ...(Array.isArray(lead.tags) ? lead.tags : [])
@@ -389,10 +429,18 @@ function leadSearchText(lead) {
 
 function publicLead(lead) {
   const status = normalizeStatus(lead.status);
+  const planoInteresse = clean(lead.planoInteresse || lead.planoAtual || '');
+  const valorNegocio = moneyText(lead.valorNegocio || lead.valor || '');
   return {
     id: lead.id,
     nome: lead.nome || '',
     telefone: lead.telefone || '',
+    email: lead.email || '',
+    pessoaTipo: lead.pessoaTipo || lead.tipoPessoa || '',
+    cnpjOuPf: lead.cnpjOuPf || lead.cnpj || lead.cpf || '',
+    qtdVidas: lead.qtdVidas || lead.quantidadeVidas || '',
+    valorNegocio,
+    planoInteresse,
     status,
     statusLabel: STATUS_LABELS[status] || status,
     origem: lead.origem || 'WhatsApp',
@@ -456,8 +504,8 @@ function buildAutoLead({ client, remoteJid, body, eventName, existing = null }) 
   const fromMe = extractFromMe(body);
 
   const base = existing || {};
-  const status = normalizeStatus(base.status || 'conversa_recente');
-  const tags = Array.from(new Set([...(Array.isArray(base.tags) ? base.tags : []), 'WhatsApp', 'Conversa recente'])).slice(0, 8);
+  const status = normalizeStatus(base.status || 'novo');
+  const tags = Array.from(new Set([...(Array.isArray(base.tags) ? base.tags : []), 'WhatsApp'])).slice(0, 8);
 
   return {
     ...base,
@@ -467,9 +515,15 @@ function buildAutoLead({ client, remoteJid, body, eventName, existing = null }) 
     whatsappJid: base.whatsappJid || normalizedJid,
     nome: shouldReplaceName(base.nome, incomingName) ? incomingName : (base.nome || incomingName || `Contato ${phoneFallback || jidLeft(normalizedJid) || 'WhatsApp'}`),
     telefone: base.telefone || phoneFromJid || phoneFallback || jidLeft(normalizedJid),
+    email: base.email || '',
+    pessoaTipo: base.pessoaTipo || base.tipoPessoa || '',
+    cnpjOuPf: base.cnpjOuPf || base.cnpj || base.cpf || '',
+    qtdVidas: base.qtdVidas || base.quantidadeVidas || '',
+    valorNegocio: base.valorNegocio || base.valor || '',
+    planoInteresse: base.planoInteresse || base.planoAtual || '',
     profilePictureUrl: base.profilePictureUrl || incomingPic || '',
     status,
-    origem: base.origem || 'WhatsApp conversa recente',
+    origem: base.origem || 'WhatsApp',
     observacao: base.observacao || '',
     proximoRetorno: base.proximoRetorno || '',
     cidade: base.cidade || '',
@@ -482,6 +536,47 @@ function buildAutoLead({ client, remoteJid, body, eventName, existing = null }) 
     lastEventName: eventName || base.lastEventName || '',
     lastWhatsappSyncAt: now,
     createdAt: base.createdAt || now,
+    updatedAt: now
+  };
+}
+
+function buildLeadFromBody(body, client, current = {}) {
+  const now = new Date().toISOString();
+  const nome = body.nome !== undefined ? clean(body.nome) : clean(current.nome);
+  const telefone = body.telefone !== undefined ? normalizePhone(body.telefone) : clean(current.telefone);
+  if (!nome || nome.length < 2) throw Object.assign(new Error('Informe o nome do lead.'), { statusCode: 400 });
+  if (!telefone || telefone.length < 8) throw Object.assign(new Error('Informe um WhatsApp válido.'), { statusCode: 400 });
+
+  const pessoaTipo = body.pessoaTipo !== undefined ? clean(body.pessoaTipo).toUpperCase() : clean(current.pessoaTipo || current.tipoPessoa || '');
+  const cnpjOuPf = body.cnpjOuPf !== undefined ? clean(body.cnpjOuPf) : clean(current.cnpjOuPf || current.cnpj || current.cpf || '');
+  const planoInteresse = body.planoInteresse !== undefined ? clean(body.planoInteresse) : clean(current.planoInteresse || current.planoAtual || '');
+  const valorNegocio = body.valorNegocio !== undefined ? clean(body.valorNegocio) : clean(current.valorNegocio || current.valor || '');
+
+  return {
+    ...current,
+    id: current.id || generateId('lead'),
+    instanceName: client.instanceName,
+    nome,
+    telefone,
+    email: body.email !== undefined ? clean(body.email) : clean(current.email || ''),
+    pessoaTipo,
+    tipoPessoa: pessoaTipo,
+    cnpjOuPf,
+    qtdVidas: body.qtdVidas !== undefined ? clean(body.qtdVidas) : clean(current.qtdVidas || current.quantidadeVidas || ''),
+    valorNegocio,
+    planoInteresse,
+    status: body.status !== undefined ? normalizeStatus(body.status) : normalizeStatus(current.status || 'novo'),
+    origem: body.origem !== undefined ? clean(body.origem) || 'Manual' : current.origem || 'Manual',
+    observacao: body.observacao !== undefined ? clean(body.observacao) : current.observacao || '',
+    proximoRetorno: body.proximoRetorno !== undefined ? clean(body.proximoRetorno) : current.proximoRetorno || '',
+    cidade: body.cidade !== undefined ? clean(body.cidade) : current.cidade || '',
+    planoAtual: body.planoAtual !== undefined ? clean(body.planoAtual) : current.planoAtual || planoInteresse,
+    valor: body.valor !== undefined ? clean(body.valor) : current.valor || valorNegocio,
+    tags: Array.isArray(body.tags) ? body.tags.map(clean).filter(Boolean).slice(0, 8) : Array.isArray(current.tags) ? current.tags : [],
+    profilePictureUrl: current.profilePictureUrl || clean(body.profilePictureUrl || ''),
+    lastMessage: current.lastMessage || '',
+    lastMessageAt: current.lastMessageAt || null,
+    createdAt: current.createdAt || now,
     updatedAt: now
   };
 }
@@ -593,7 +688,7 @@ async function handleAutoWebhook(req, res) {
     logAuto(summary);
     return send(res, 200, { ok: true, client: publicClient(client), ...summary, lead: publicLead(lead), version: VERSION });
   } catch (error) {
-    return send(res, error.response?.status || 500, { ok: false, error: error.message || 'Erro no webhook de conversas automáticas.', details: error.response?.data || null, version: VERSION });
+    return send(res, error.statusCode || error.response?.status || 500, { ok: false, error: error.message || 'Erro no webhook de conversas automáticas.', details: error.response?.data || null, version: VERSION });
   }
 }
 
@@ -614,11 +709,11 @@ async function configureAutoWebhook(req, res) {
       events: result.payload.webhook.events,
       evolutionStatus: result.status,
       evolutionResponse: result.data,
-      behavior: 'Mensagens recebidas criam Conversa recente automaticamente. Mensagens enviadas só atualizam conversas já existentes.',
+      behavior: 'Mensagens recebidas criam Novos automaticamente. Mensagens enviadas só atualizam conversas já existentes.',
       version: VERSION
     });
   } catch (error) {
-    return send(res, error.response?.status || 500, { ok: false, error: error.message || 'Erro ao configurar conversas automáticas.', details: error.response?.data || null, version: VERSION });
+    return send(res, error.statusCode || error.response?.status || 500, { ok: false, error: error.message || 'Erro ao configurar conversas automáticas.', details: error.response?.data || null, version: VERSION });
   }
 }
 
@@ -641,7 +736,7 @@ function listAutoLeads(req, res) {
     const statusQuery = clean(req.query.status || '');
     const includeArchived = ['1', 'true', 'sim', 'yes'].includes(clean(req.query.includeArchived).toLowerCase());
     const query = clean(req.query.q || req.query.search || '').toLowerCase();
-    const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 500);
+    const limit = Math.min(Math.max(Number(req.query.limit || 300), 1), 1000);
 
     let leads = loadArray(LEADS_FILE).filter((lead) => clean(lead.instanceName) === clean(client.instanceName));
     const allForSummary = leads.slice();
@@ -665,7 +760,8 @@ function listAutoLeads(req, res) {
       leads: sorted.map(publicLead),
       summary: summarizeLeads(leads),
       fullSummary: summarizeLeads(allForSummary),
-      statuses: Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
+      statuses: Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label, pipeline: PIPELINE_STATUSES.includes(value) })),
+      pipelineStatuses: PIPELINE_STATUSES.map((value) => ({ value, label: STATUS_LABELS[value] })),
       version: VERSION
     });
   } catch (error) {
@@ -682,35 +778,12 @@ async function createOrUpdateManualLead(req, res, existingId = '') {
 
     const leads = loadArray(LEADS_FILE);
     const id = clean(existingId || req.params?.id || '');
-    const now = new Date().toISOString();
     const index = id ? leads.findIndex((lead) => lead.id === id && clean(lead.instanceName) === clean(client.instanceName)) : -1;
     const current = index >= 0 ? leads[index] : {};
 
     if (id && index < 0) return send(res, 404, { ok: false, error: 'Lead não encontrado para este cliente.', version: VERSION });
 
-    const nome = body.nome !== undefined ? clean(body.nome) : clean(current.nome);
-    const telefone = body.telefone !== undefined ? normalizePhone(body.telefone) : clean(current.telefone);
-    if (!nome || nome.length < 2) return send(res, 400, { ok: false, error: 'Informe o nome do lead.', version: VERSION });
-    if (!telefone || telefone.length < 10) return send(res, 400, { ok: false, error: 'Informe um WhatsApp válido.', version: VERSION });
-
-    const lead = {
-      ...current,
-      id: current.id || generateId('lead'),
-      instanceName: client.instanceName,
-      nome,
-      telefone,
-      status: body.status !== undefined ? normalizeStatus(body.status) : normalizeStatus(current.status || 'novo_lead'),
-      origem: body.origem !== undefined ? clean(body.origem) || 'Manual' : current.origem || 'Manual',
-      observacao: body.observacao !== undefined ? clean(body.observacao) : current.observacao || '',
-      proximoRetorno: body.proximoRetorno !== undefined ? clean(body.proximoRetorno) : current.proximoRetorno || '',
-      cidade: body.cidade !== undefined ? clean(body.cidade) : current.cidade || '',
-      planoAtual: body.planoAtual !== undefined ? clean(body.planoAtual) : current.planoAtual || '',
-      valor: body.valor !== undefined ? clean(body.valor) : current.valor || '',
-      tags: Array.isArray(body.tags) ? body.tags.map(clean).filter(Boolean).slice(0, 8) : Array.isArray(current.tags) ? current.tags : [],
-      profilePictureUrl: current.profilePictureUrl || clean(body.profilePictureUrl || ''),
-      createdAt: current.createdAt || now,
-      updatedAt: now
-    };
+    const lead = buildLeadFromBody(body, client, current);
 
     if (index >= 0) leads[index] = lead;
     else leads.push(lead);
@@ -718,7 +791,57 @@ async function createOrUpdateManualLead(req, res, existingId = '') {
 
     return send(res, index >= 0 ? 200 : 201, { ok: true, lead: publicLead(lead), summary: summarizeLeads(leads.filter((item) => clean(item.instanceName) === clean(client.instanceName))), version: VERSION });
   } catch (error) {
-    return send(res, 500, { ok: false, error: error.message || 'Erro ao salvar lead.', version: VERSION });
+    return send(res, error.statusCode || 500, { ok: false, error: error.message || 'Erro ao salvar lead.', version: VERSION });
+  }
+}
+
+async function importAutoLeads(req, res) {
+  try {
+    const body = await readBody(req);
+    const token = tokenFromRequest(req, body);
+    const client = findClientByToken(token);
+    if (!client) return send(res, 403, { ok: false, error: 'Token inválido ou inativo.', version: VERSION });
+
+    const incoming = Array.isArray(body.leads) ? body.leads : [];
+    if (!incoming.length) return send(res, 400, { ok: false, error: 'Envie uma lista de leads para importar.', version: VERSION });
+
+    const leads = loadArray(LEADS_FILE);
+    let created = 0;
+    let updated = 0;
+    const errors = [];
+
+    incoming.slice(0, 1000).forEach((item, idx) => {
+      try {
+        const phone = normalizePhone(item.telefone || item.whatsapp || item.celular || '');
+        let index = -1;
+        if (phone) {
+          index = leads.findIndex((lead) => clean(lead.instanceName) === clean(client.instanceName) && normalizePhone(lead.telefone || '') === phone);
+        }
+        const current = index >= 0 ? leads[index] : {};
+        const lead = buildLeadFromBody({ ...item, telefone: phone, origem: item.origem || 'Importação', status: item.status || 'novo' }, client, current);
+        if (index >= 0) {
+          leads[index] = lead;
+          updated += 1;
+        } else {
+          leads.push(lead);
+          created += 1;
+        }
+      } catch (error) {
+        errors.push({ row: idx + 2, error: error.message });
+      }
+    });
+
+    saveArray(LEADS_FILE, leads);
+    return send(res, 200, {
+      ok: true,
+      created,
+      updated,
+      errors,
+      summary: summarizeLeads(leads.filter((item) => clean(item.instanceName) === clean(client.instanceName))),
+      version: VERSION
+    });
+  } catch (error) {
+    return send(res, error.statusCode || 500, { ok: false, error: error.message || 'Erro ao importar leads.', version: VERSION });
   }
 }
 
@@ -736,6 +859,17 @@ function setLeadStatus(req, res, status, extra = {}) {
     leads[index] = { ...leads[index], ...extra, status: normalizeStatus(status), updatedAt: new Date().toISOString() };
     saveArray(LEADS_FILE, leads);
     return send(res, 200, { ok: true, lead: publicLead(leads[index]), removedFromMainView: normalizeStatus(status) === 'arquivado', version: VERSION });
+  } catch (error) {
+    return send(res, 500, { ok: false, error: error.message || 'Erro ao alterar status.', version: VERSION });
+  }
+}
+
+async function patchLeadStatus(req, res) {
+  try {
+    const body = await readBody(req);
+    const status = body.status || req.query.status || '';
+    if (!status) return send(res, 400, { ok: false, error: 'Informe o status.', version: VERSION });
+    return setLeadStatus(req, res, status);
   } catch (error) {
     return send(res, 500, { ok: false, error: error.message || 'Erro ao alterar status.', version: VERSION });
   }
@@ -791,9 +925,11 @@ function register(app) {
   app.options('/api/crm/auto-conversations-webhook', (req, res) => send(res, 204, {}));
   app.options('/api/crm/auto-conversations-webhook/:eventName', (req, res) => send(res, 204, {}));
   app.options('/api/crm/auto-leads', (req, res) => send(res, 204, {}));
+  app.options('/api/crm/auto-leads/import', (req, res) => send(res, 204, {}));
   app.options('/api/crm/auto-leads/:id', (req, res) => send(res, 204, {}));
   app.options('/api/crm/auto-leads/:id/archive', (req, res) => send(res, 204, {}));
   app.options('/api/crm/auto-leads/:id/unarchive', (req, res) => send(res, 204, {}));
+  app.options('/api/crm/auto-leads/:id/status', (req, res) => send(res, 204, {}));
 
   app.post('/api/crm/auto-conversations-webhook', handleAutoWebhook);
   app.post('/api/crm/auto-conversations-webhook/:eventName', handleAutoWebhook);
@@ -807,7 +943,8 @@ function register(app) {
     leadsFile: LEADS_FILE,
     logFile: AUTO_LOG_FILE,
     events: autoEvents(),
-    behavior: 'Mensagens recebidas criam Conversa recente; mensagens enviadas sem lead existente são ignoradas.',
+    statuses: Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label, pipeline: PIPELINE_STATUSES.includes(value) })),
+    behavior: 'Mensagens recebidas criam Novos; mensagens enviadas sem lead existente são ignoradas.',
     time: new Date().toISOString()
   }));
   app.get('/api/crm/configure-auto-conversations-browser', configureAutoWebhook);
@@ -815,10 +952,13 @@ function register(app) {
 
   app.get('/api/crm/auto-leads', listAutoLeads);
   app.post('/api/crm/auto-leads', (req, res) => createOrUpdateManualLead(req, res));
+  app.post('/api/crm/auto-leads/import', importAutoLeads);
   app.put('/api/crm/auto-leads/:id', (req, res) => createOrUpdateManualLead(req, res, req.params.id));
   app.patch('/api/crm/auto-leads/:id', (req, res) => createOrUpdateManualLead(req, res, req.params.id));
+  app.post('/api/crm/auto-leads/:id/status', patchLeadStatus);
+  app.patch('/api/crm/auto-leads/:id/status', patchLeadStatus);
   app.post('/api/crm/auto-leads/:id/archive', (req, res) => setLeadStatus(req, res, 'arquivado', { archivedAt: new Date().toISOString() }));
-  app.post('/api/crm/auto-leads/:id/unarchive', (req, res) => setLeadStatus(req, res, 'conversa_recente', { archivedAt: null }));
+  app.post('/api/crm/auto-leads/:id/unarchive', (req, res) => setLeadStatus(req, res, 'novo', { archivedAt: null }));
   app.delete('/api/crm/auto-leads/:id', deleteAutoLead);
 }
 
