@@ -8,7 +8,7 @@ const axios = require('axios');
 const realExpress = require('express');
 
 let registered = false;
-const VERSION = '1.7.4-token-safe-browser-sync';
+const VERSION = '1.7.5-labelid-attempts';
 
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
@@ -84,6 +84,12 @@ function saveJsonArray(filePath, items) {
   fs.writeFileSync(filePath, `${JSON.stringify(items, null, 2)}\n`, 'utf8');
 }
 
+function findClientByToken(token) {
+  const clean = cleanToken(token);
+  if (!clean) return null;
+  return loadJsonArray(CLIENTS_FILE).find((item) => cleanToken(item.token) === clean && item.ativo !== false) || null;
+}
+
 function publicClient(client) {
   return {
     nome: client.nome || client.instanceName,
@@ -91,78 +97,6 @@ function publicClient(client) {
     ativo: client.ativo !== false,
     whatsapp: client.whatsapp || ''
   };
-}
-
-function safeDecode(value) {
-  const text = clean(value);
-  if (!text) return '';
-  try {
-    return decodeURIComponent(text);
-  } catch {
-    return text;
-  }
-}
-
-function rawQueryParam(req, names) {
-  const rawUrl = String(req.originalUrl || req.url || '');
-  const queryIndex = rawUrl.indexOf('?');
-  if (queryIndex < 0) return '';
-  const rawQuery = rawUrl.slice(queryIndex + 1);
-  const wanted = names.map((name) => name.toLowerCase());
-
-  for (const part of rawQuery.split('&')) {
-    const equalIndex = part.indexOf('=');
-    if (equalIndex < 0) continue;
-    const rawKey = part.slice(0, equalIndex);
-    const rawValue = part.slice(equalIndex + 1);
-    const key = safeDecode(rawKey).toLowerCase();
-    if (wanted.includes(key)) return rawValue;
-  }
-
-  return '';
-}
-
-function uniqueByCleanToken(values) {
-  const seen = new Set();
-  const output = [];
-
-  values.forEach((value) => {
-    const text = clean(value);
-    const normalized = cleanToken(text);
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    output.push(text);
-  });
-
-  return output;
-}
-
-function tokenCandidatesFromRequest(req) {
-  const values = [];
-  const query = req.query || {};
-  const raw = rawQueryParam(req, ['token', 't', 'accessToken', 'clientToken']);
-
-  values.push(query.token, query.t, query.accessToken, query.clientToken, req.headers['x-client-token']);
-  values.push(raw, safeDecode(raw), safeDecode(raw).replace(/\s/g, '+'));
-
-  Object.values(query).forEach((value) => {
-    if (typeof value === 'string') {
-      values.push(value, value.replace(/\s/g, '+'));
-    }
-  });
-
-  return uniqueByCleanToken(values);
-}
-
-function tokenCandidateDiagnostics(candidates) {
-  return candidates.map((candidate) => ({ length: cleanToken(candidate).length }));
-}
-
-function findClientByTokenCandidates(candidates) {
-  const clients = loadJsonArray(CLIENTS_FILE);
-  const normalizedCandidates = candidates.map(cleanToken).filter(Boolean);
-  const client = clients.find((item) => item.ativo !== false && normalizedCandidates.includes(cleanToken(item.token)));
-  return { client: client || null, clientCount: clients.length };
 }
 
 function evolutionBaseUrl() {
@@ -192,34 +126,39 @@ function ensureEvolutionConfig() {
   if (!process.env.EVOLUTION_API_KEY) throw new Error('EVOLUTION_API_KEY não configurado.');
 }
 
-async function findEvolutionLabels(instanceName) {
-  ensureEvolutionConfig();
-  const url = buildEvolutionUrl(process.env.EVOLUTION_FIND_LABELS_PATH || '/label/findLabels/:instanceName', instanceName);
-  const response = await axios.get(url, { headers: evolutionHeaders(), timeout: 30000 });
-  const data = response.data;
+function extractArray(data) {
   if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.labels)) return data.labels;
-  if (Array.isArray(data?.data)) return data.data;
-  return [];
-}
-
-async function findEvolutionChats(instanceName, limit = DEFAULT_SYNC_LIMIT) {
-  ensureEvolutionConfig();
-  const url = buildEvolutionUrl(process.env.EVOLUTION_FIND_CHATS_PATH || '/chat/findChats/:instanceName', instanceName);
-  const take = Math.min(Math.max(Number(limit) || DEFAULT_SYNC_LIMIT, 1), 1000);
-  const response = await axios.post(url, {
-    where: {},
-    take,
-    skip: 0,
-    orderBy: { updatedAt: 'desc' }
-  }, { headers: evolutionHeaders(), timeout: 60000 });
-
-  const data = response.data;
-  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.response)) return data.response;
   if (Array.isArray(data?.chats)) return data.chats;
   if (Array.isArray(data?.data)) return data.data;
   if (Array.isArray(data?.items)) return data.items;
   return [];
+}
+
+async function findEvolutionLabels(instanceName) {
+  ensureEvolutionConfig();
+  const url = buildEvolutionUrl(process.env.EVOLUTION_FIND_LABELS_PATH || '/label/findLabels/:instanceName', instanceName);
+  const response = await axios.get(url, { headers: evolutionHeaders(), timeout: 30000 });
+  return extractArray(response.data);
+}
+
+async function postFindChatsAttempt(instanceName, body, attemptName) {
+  ensureEvolutionConfig();
+  const url = buildEvolutionUrl(process.env.EVOLUTION_FIND_CHATS_PATH || '/chat/findChats/:instanceName', instanceName);
+  const response = await axios.post(url, body, {
+    headers: evolutionHeaders(),
+    timeout: 60000,
+    validateStatus: () => true
+  });
+
+  const chats = response.status >= 200 && response.status < 300 ? extractArray(response.data) : [];
+  return {
+    attemptName,
+    status: response.status,
+    count: chats.length,
+    chats,
+    error: response.status >= 200 && response.status < 300 ? null : response.data
+  };
 }
 
 function findTargetLabel(labels, labelName) {
@@ -246,9 +185,20 @@ function labelMatches(value, targetName, targetLabel) {
   if (Array.isArray(value)) return value.some((item) => labelMatches(item, targetName, targetLabel));
 
   if (typeof value === 'object') {
-    const possible = [value.name, value.label, value.title, value.id, value.labelId, value.label_id, value.value];
+    const possible = [
+      value.name,
+      value.label,
+      value.title,
+      value.id,
+      value.labelId,
+      value.label_id,
+      value.value,
+      value.chatLabelId,
+      value.chat_label_id
+    ];
     if (possible.some((item) => labelMatches(item, targetName, targetLabel))) return true;
     if (Array.isArray(value.labels) && labelMatches(value.labels, targetName, targetLabel)) return true;
+    if (Array.isArray(value.Labels) && labelMatches(value.Labels, targetName, targetLabel)) return true;
     if (Array.isArray(value.Tags) && labelMatches(value.Tags, targetName, targetLabel)) return true;
   }
 
@@ -267,6 +217,8 @@ function chatHasLabel(chat, labelName, targetLabel) {
     chat.labelId,
     chat.labelIds,
     chat.labelsId,
+    chat.chatLabelId,
+    chat.chatLabelIds,
     chat.whatsappLabels,
     chat.chatLabels,
     chat.metadata?.labels,
@@ -314,13 +266,25 @@ function buildLeadFromChat(chat, client, labelName) {
   };
 }
 
+function uniqueChats(chats) {
+  const seen = new Set();
+  const output = [];
+  chats.forEach((chat) => {
+    const key = extractRemoteJid(chat) || JSON.stringify(chat).slice(0, 120);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    output.push(chat);
+  });
+  return output;
+}
+
 function upsertLeadsFromChats(currentLeads, client, chats, labelName) {
   const instanceName = clean(client.instanceName);
   let created = 0;
   let updated = 0;
   let ignored = 0;
 
-  chats.forEach((chat) => {
+  uniqueChats(chats).forEach((chat) => {
     const incoming = buildLeadFromChat(chat, client, labelName);
     if (!incoming) {
       ignored += 1;
@@ -361,30 +325,31 @@ function upsertLeadsFromChats(currentLeads, client, chats, labelName) {
   return { created, updated, ignored };
 }
 
+function safeAttempt(attempt, allCount) {
+  return {
+    attemptName: attempt.attemptName,
+    status: attempt.status,
+    count: attempt.count,
+    usedAsMatch: false,
+    warning: attempt.count === allCount && allCount > 0 ? 'Retornou a mesma quantidade do total; não será usado para evitar importar todos os chats.' : null
+  };
+}
+
 async function syncByBrowser(req, res) {
   try {
-    const candidates = tokenCandidatesFromRequest(req);
+    const token = clean(req.query.token || req.query.t || req.headers['x-client-token'] || '');
     const labelName = clean(req.query.labelName || req.query.label || DEFAULT_LABEL) || DEFAULT_LABEL;
     const limit = Number(req.query.limit || DEFAULT_SYNC_LIMIT);
 
-    if (!candidates.length) {
-      return send(res, 400, {
-        ok: false,
-        error: 'Informe o token na URL.',
-        via: 'browser-token-safe',
-        proxyVersion: VERSION
-      });
-    }
+    if (!token) return send(res, 400, { ok: false, error: 'Informe o token na URL.', via: 'browser-labelid-attempts', proxyVersion: VERSION });
 
-    const { client, clientCount } = findClientByTokenCandidates(candidates);
+    const client = findClientByToken(token);
     if (!client) {
       return send(res, 403, {
         ok: false,
         error: 'Token inválido ou inativo nesta rota de sync.',
-        hint: 'Copie o token inteiro da página Admin e cole depois de ?token=. Se tiver +, &, # ou espaços, o token precisa estar codificado na URL.',
-        receivedTokenCandidates: tokenCandidateDiagnostics(candidates),
-        clientCount,
-        via: 'browser-token-safe',
+        hint: 'Copie o token inteiro da página Admin e cole depois de ?token=.',
+        via: 'browser-labelid-attempts',
         proxyVersion: VERSION
       });
     }
@@ -398,29 +363,70 @@ async function syncByBrowser(req, res) {
         error: `Etiqueta "${labelName}" não encontrada no WhatsApp conectado.`,
         labels,
         labelNames: labels.map((item) => item?.name || item?.label || item?.title || item?.id).filter(Boolean),
-        via: 'browser-token-safe',
+        via: 'browser-labelid-attempts',
         proxyVersion: VERSION
       });
     }
 
-    const chats = await findEvolutionChats(client.instanceName, limit);
-    const matchedChats = chats.filter((chat) => chatHasLabel(chat, labelName, targetLabel) || chatHasLabel(chat, targetLabel.name || labelName, targetLabel));
+    const labelId = String(targetLabel.id || targetLabel.labelId || targetLabel.value || '').trim();
+    const take = Math.min(Math.max(Number(limit) || DEFAULT_SYNC_LIMIT, 1), 1000);
+    const baseOrder = { updatedAt: 'desc' };
+
+    const allAttempt = await postFindChatsAttempt(client.instanceName, { where: {}, take, skip: 0, orderBy: baseOrder }, 'all_chats_then_local_label_check');
+    const attempts = [safeAttempt(allAttempt, allAttempt.count)];
+
+    let matchedChats = allAttempt.chats.filter((chat) => chatHasLabel(chat, labelName, targetLabel));
+    let matchSource = matchedChats.length > 0 ? 'local_chat_label_fields' : '';
+
+    if (matchedChats.length === 0 && labelId) {
+      const filterBodies = [
+        { attemptName: 'where_labelId_equals', body: { where: { labelId }, take, skip: 0, orderBy: baseOrder } },
+        { attemptName: 'where_labelsId_equals', body: { where: { labelsId: labelId }, take, skip: 0, orderBy: baseOrder } },
+        { attemptName: 'where_labelIds_has', body: { where: { labelIds: { has: labelId } }, take, skip: 0, orderBy: baseOrder } },
+        { attemptName: 'where_labels_some_id', body: { where: { labels: { some: { id: labelId } } }, take, skip: 0, orderBy: baseOrder } },
+        { attemptName: 'where_Labels_some_id', body: { where: { Labels: { some: { id: labelId } } }, take, skip: 0, orderBy: baseOrder } },
+        { attemptName: 'where_label_id_object', body: { where: { label: { id: labelId } }, take, skip: 0, orderBy: baseOrder } }
+      ];
+
+      for (const item of filterBodies) {
+        const attempt = await postFindChatsAttempt(client.instanceName, item.body, item.attemptName);
+        const summary = safeAttempt(attempt, allAttempt.count);
+
+        const looksFiltered = attempt.count > 0 && (allAttempt.count === 0 || attempt.count < allAttempt.count);
+        if (matchedChats.length === 0 && looksFiltered) {
+          matchedChats = uniqueChats(attempt.chats);
+          matchSource = item.attemptName;
+          summary.usedAsMatch = true;
+          summary.warning = null;
+        }
+
+        attempts.push(summary);
+      }
+    }
+
     const leads = loadJsonArray(LEADS_FILE);
-    const result = upsertLeadsFromChats(leads, client, matchedChats, targetLabel.name || labelName);
-    saveJsonArray(LEADS_FILE, leads);
+    const result = matchedChats.length > 0
+      ? upsertLeadsFromChats(leads, client, matchedChats, targetLabel.name || labelName)
+      : { created: 0, updated: 0, ignored: 0 };
+    if (matchedChats.length > 0) saveJsonArray(LEADS_FILE, leads);
 
     return send(res, 200, {
       ok: true,
       client: publicClient(client),
       labelName: targetLabel.name || labelName,
       label: targetLabel,
-      scannedChats: chats.length,
-      matchedChats: matchedChats.length,
+      labelId,
+      scannedChats: allAttempt.count,
+      matchedChats: uniqueChats(matchedChats).length,
+      matchSource: matchSource || null,
       created: result.created,
       updated: result.updated,
       ignored: result.ignored,
-      warning: matchedChats.length === 0 ? 'A etiqueta existe, mas as conversas retornadas pela Evolution não vieram com esse label vinculado. Próximo passo: testar busca por labelId.' : null,
-      via: 'browser-token-safe',
+      attempts,
+      warning: matchedChats.length === 0
+        ? 'A etiqueta existe, mas nenhuma forma de busca retornou claramente os chats marcados. Veja attempts para saber se algum filtro por labelId retornou quantidade diferente do total.'
+        : null,
+      via: 'browser-labelid-attempts',
       proxyVersion: VERSION
     });
   } catch (error) {
@@ -428,7 +434,7 @@ async function syncByBrowser(req, res) {
       ok: false,
       error: error.message || 'Erro ao sincronizar MiniCRM pelo navegador.',
       details: error.response?.data || null,
-      via: 'browser-token-safe',
+      via: 'browser-labelid-attempts',
       proxyVersion: VERSION
     });
   }
