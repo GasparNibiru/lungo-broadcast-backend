@@ -1,5 +1,5 @@
 // Browser-friendly MiniCRM sync route.
-// Uses the same token validation path as /api/crm/whatsapp/labels, then syncs chats marked with MiniCRM.
+// Direct GET /api/crm/sync-whatsapp-label-browser for browser tests.
 
 const fs = require('fs');
 const path = require('path');
@@ -8,7 +8,7 @@ const axios = require('axios');
 const realExpress = require('express');
 
 let registered = false;
-const VERSION = '1.7.3-browser-label-validation';
+const VERSION = '1.7.4-token-safe-browser-sync';
 
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
@@ -32,7 +32,7 @@ function clean(value) {
 }
 
 function cleanToken(value) {
-  return clean(value).toUpperCase().replace(/\s+/g, '');
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
 function slugify(value) {
@@ -93,6 +93,78 @@ function publicClient(client) {
   };
 }
 
+function safeDecode(value) {
+  const text = clean(value);
+  if (!text) return '';
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+function rawQueryParam(req, names) {
+  const rawUrl = String(req.originalUrl || req.url || '');
+  const queryIndex = rawUrl.indexOf('?');
+  if (queryIndex < 0) return '';
+  const rawQuery = rawUrl.slice(queryIndex + 1);
+  const wanted = names.map((name) => name.toLowerCase());
+
+  for (const part of rawQuery.split('&')) {
+    const equalIndex = part.indexOf('=');
+    if (equalIndex < 0) continue;
+    const rawKey = part.slice(0, equalIndex);
+    const rawValue = part.slice(equalIndex + 1);
+    const key = safeDecode(rawKey).toLowerCase();
+    if (wanted.includes(key)) return rawValue;
+  }
+
+  return '';
+}
+
+function uniqueByCleanToken(values) {
+  const seen = new Set();
+  const output = [];
+
+  values.forEach((value) => {
+    const text = clean(value);
+    const normalized = cleanToken(text);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    output.push(text);
+  });
+
+  return output;
+}
+
+function tokenCandidatesFromRequest(req) {
+  const values = [];
+  const query = req.query || {};
+  const raw = rawQueryParam(req, ['token', 't', 'accessToken', 'clientToken']);
+
+  values.push(query.token, query.t, query.accessToken, query.clientToken, req.headers['x-client-token']);
+  values.push(raw, safeDecode(raw), safeDecode(raw).replace(/\s/g, '+'));
+
+  Object.values(query).forEach((value) => {
+    if (typeof value === 'string') {
+      values.push(value, value.replace(/\s/g, '+'));
+    }
+  });
+
+  return uniqueByCleanToken(values);
+}
+
+function tokenCandidateDiagnostics(candidates) {
+  return candidates.map((candidate) => ({ length: cleanToken(candidate).length }));
+}
+
+function findClientByTokenCandidates(candidates) {
+  const clients = loadJsonArray(CLIENTS_FILE);
+  const normalizedCandidates = candidates.map(cleanToken).filter(Boolean);
+  const client = clients.find((item) => item.ativo !== false && normalizedCandidates.includes(cleanToken(item.token)));
+  return { client: client || null, clientCount: clients.length };
+}
+
 function evolutionBaseUrl() {
   return String(process.env.EVOLUTION_BASE_URL || '').replace(/\/+$/, '');
 }
@@ -118,32 +190,6 @@ function buildEvolutionUrl(template, instanceName) {
 function ensureEvolutionConfig() {
   if (!evolutionBaseUrl()) throw new Error('EVOLUTION_BASE_URL não configurado.');
   if (!process.env.EVOLUTION_API_KEY) throw new Error('EVOLUTION_API_KEY não configurado.');
-}
-
-function localBaseUrl() {
-  if (process.env.CRM_SYNC_INTERNAL_URL) return process.env.CRM_SYNC_INTERNAL_URL.replace(/\/+$/, '');
-  const port = process.env.PORT || 80;
-  return `http://127.0.0.1:${port}`;
-}
-
-async function getClientAndLabelsByExistingRoute(token) {
-  const url = `${localBaseUrl()}/api/crm/whatsapp/labels?token=${encodeURIComponent(token)}`;
-  const response = await axios.get(url, { timeout: 60000, validateStatus: () => true });
-  if (response.status >= 200 && response.status < 300 && response.data?.ok && response.data?.client) {
-    return {
-      ok: true,
-      client: response.data.client,
-      labels: Array.isArray(response.data.labels) ? response.data.labels : [],
-      source: 'existing-labels-route'
-    };
-  }
-  return { ok: false, status: response.status, data: response.data || null };
-}
-
-function findClientByTokenFallback(token) {
-  const normalized = cleanToken(token);
-  if (!normalized) return null;
-  return loadJsonArray(CLIENTS_FILE).find((item) => cleanToken(item.token) === normalized && item.ativo !== false) || null;
 }
 
 async function findEvolutionLabels(instanceName) {
@@ -317,60 +363,55 @@ function upsertLeadsFromChats(currentLeads, client, chats, labelName) {
 
 async function syncByBrowser(req, res) {
   try {
-    const token = clean(req.query.token || req.query.t || req.headers['x-client-token'] || '');
+    const candidates = tokenCandidatesFromRequest(req);
     const labelName = clean(req.query.labelName || req.query.label || DEFAULT_LABEL) || DEFAULT_LABEL;
     const limit = Number(req.query.limit || DEFAULT_SYNC_LIMIT);
 
-    if (!token) return send(res, 400, { ok: false, error: 'Informe o token na URL.', via: 'browser-label-validation', proxyVersion: VERSION });
-
-    let validation = await getClientAndLabelsByExistingRoute(token);
-    let client = validation.ok ? validation.client : null;
-    let labels = validation.ok ? validation.labels : [];
-    let validationSource = validation.source || 'existing-labels-route-failed';
-
-    if (!client) {
-      const fallbackClient = findClientByTokenFallback(token);
-      if (fallbackClient) {
-        client = publicClient(fallbackClient);
-        labels = await findEvolutionLabels(client.instanceName);
-        validationSource = 'fallback-clientes-json';
-      }
-    }
-
-    if (!client) {
-      return send(res, 403, {
+    if (!candidates.length) {
+      return send(res, 400, {
         ok: false,
-        error: 'Token inválido ou inativo nesta rota de sync.',
-        hint: 'O token funcionou na rota de etiquetas, então use o mesmo valor exatamente depois de ?token=. Esta versão também tentou validar pela rota de etiquetas.',
-        labelsRouteStatus: validation.status || null,
-        labelsRouteError: validation.data?.error || null,
-        via: 'browser-label-validation',
+        error: 'Informe o token na URL.',
+        via: 'browser-token-safe',
         proxyVersion: VERSION
       });
     }
 
+    const { client, clientCount } = findClientByTokenCandidates(candidates);
+    if (!client) {
+      return send(res, 403, {
+        ok: false,
+        error: 'Token inválido ou inativo nesta rota de sync.',
+        hint: 'Copie o token inteiro da página Admin e cole depois de ?token=. Se tiver +, &, # ou espaços, o token precisa estar codificado na URL.',
+        receivedTokenCandidates: tokenCandidateDiagnostics(candidates),
+        clientCount,
+        via: 'browser-token-safe',
+        proxyVersion: VERSION
+      });
+    }
+
+    const labels = await findEvolutionLabels(client.instanceName);
     const targetLabel = findTargetLabel(labels, labelName);
+
     if (!targetLabel) {
       return send(res, 404, {
         ok: false,
         error: `Etiqueta "${labelName}" não encontrada no WhatsApp conectado.`,
         labels,
         labelNames: labels.map((item) => item?.name || item?.label || item?.title || item?.id).filter(Boolean),
-        validationSource,
-        via: 'browser-label-validation',
+        via: 'browser-token-safe',
         proxyVersion: VERSION
       });
     }
 
     const chats = await findEvolutionChats(client.instanceName, limit);
-    const matchedChats = chats.filter((chat) => chatHasLabel(chat, targetLabel.name || labelName, targetLabel) || chatHasLabel(chat, labelName, targetLabel));
+    const matchedChats = chats.filter((chat) => chatHasLabel(chat, labelName, targetLabel) || chatHasLabel(chat, targetLabel.name || labelName, targetLabel));
     const leads = loadJsonArray(LEADS_FILE);
     const result = upsertLeadsFromChats(leads, client, matchedChats, targetLabel.name || labelName);
     saveJsonArray(LEADS_FILE, leads);
 
     return send(res, 200, {
       ok: true,
-      client,
+      client: publicClient(client),
       labelName: targetLabel.name || labelName,
       label: targetLabel,
       scannedChats: chats.length,
@@ -379,8 +420,7 @@ async function syncByBrowser(req, res) {
       updated: result.updated,
       ignored: result.ignored,
       warning: matchedChats.length === 0 ? 'A etiqueta existe, mas as conversas retornadas pela Evolution não vieram com esse label vinculado. Próximo passo: testar busca por labelId.' : null,
-      validationSource,
-      via: 'browser-label-validation',
+      via: 'browser-token-safe',
       proxyVersion: VERSION
     });
   } catch (error) {
@@ -388,7 +428,7 @@ async function syncByBrowser(req, res) {
       ok: false,
       error: error.message || 'Erro ao sincronizar MiniCRM pelo navegador.',
       details: error.response?.data || null,
-      via: 'browser-label-validation',
+      via: 'browser-token-safe',
       proxyVersion: VERSION
     });
   }
