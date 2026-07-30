@@ -1,5 +1,6 @@
 // Sync last WhatsApp conversations into the automatic CRM pipeline.
 // Keeps the CRM populated with recent chats when the user clicks "Sincronizar contatos".
+// v2.2 improves contact cleanup: avoids self names like "Você" and avoids using @lid ids as phone numbers.
 
 const fs = require('fs');
 const path = require('path');
@@ -8,7 +9,7 @@ const axios = require('axios');
 const realExpress = require('express');
 
 let registered = false;
-const VERSION = '2.1.0-recent-conversation-sync';
+const VERSION = '2.2.0-clean-recent-sync';
 
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
@@ -127,6 +128,7 @@ function normalizePhone(value) {
   let digits = clean(value).replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);
   if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) digits = `55${digits}`;
+  if (digits.length < 10 || digits.length > 15) return '';
   return digits;
 }
 
@@ -140,6 +142,10 @@ function normalizeJid(value) {
 
 function jidLeft(value) {
   return normalizeJid(value).split('@')[0] || '';
+}
+
+function jidDomain(value) {
+  return normalizeJid(value).split('@')[1] || '';
 }
 
 function collectStrings(value, output = [], seen = new Set()) {
@@ -221,19 +227,39 @@ function extractRemoteJid(item) {
   return normalizeJid(found);
 }
 
+function isSelfOrBadName(value) {
+  const raw = clean(value);
+  if (!raw) return true;
+  const normalized = slugify(raw);
+  if (['voce', 'voces', 'eu', 'me', 'myself', 'you', 'self', 'owner', 'whatsapp', 'unknown', 'desconhecido'].includes(normalized)) return true;
+  if (/^(voce|você)$/i.test(raw)) return true;
+  if (raw.includes('@')) return true;
+  if (/^https?:\/\//i.test(raw)) return true;
+  if (/^\+?\d{8,}$/.test(raw.replace(/[\s().-]/g, ''))) return true;
+  if (/^(true|false|null|undefined)$/i.test(raw)) return true;
+  return false;
+}
+
+function isUsefulName(value) {
+  const raw = clean(value);
+  if (raw.length < 2 || raw.length > 80) return false;
+  return !isSelfOrBadName(raw);
+}
+
 function extractName(item) {
   const values = [
+    item?.contact?.name,
+    item?.contact?.pushName,
+    item?.contact?.verifiedName,
     item?.name,
     item?.pushName,
     item?.verifiedName,
     item?.notify,
-    item?.contact?.name,
-    item?.contact?.pushName,
     item?.lastMessage?.pushName,
     item?.messages?.[0]?.pushName,
     ...collectByKey(item, ['pushname', 'verifiedname', 'profilename', 'name', 'notify'])
   ].map(clean).filter(Boolean);
-  return values.find((entry) => !entry.includes('@') && entry.length > 1 && entry.length < 100) || '';
+  return values.find(isUsefulName) || '';
 }
 
 function extractProfilePic(item) {
@@ -247,6 +273,46 @@ function extractProfilePic(item) {
     ...collectByKey(item, ['profilepicurl', 'profilepictureurl', 'avatar', 'picture', 'imgurl'])
   ].map(clean).filter(Boolean);
   return values.find((entry) => /^https?:\/\//i.test(entry)) || '';
+}
+
+function extractPhone(item, remoteJid) {
+  const normalizedJid = normalizeJid(remoteJid);
+  const domain = jidDomain(normalizedJid);
+  const values = [
+    item?.number,
+    item?.phone,
+    item?.waId,
+    item?.contact?.number,
+    item?.contact?.phone,
+    item?.contact?.waId,
+    ...collectByKey(item, ['number', 'phone', 'phonenumber', 'waid', 'telefone', 'celular'])
+  ].map(normalizePhone).filter(Boolean);
+
+  if (domain === 's.whatsapp.net' || domain === 'c.us') {
+    const fromJid = normalizePhone(jidLeft(normalizedJid));
+    if (fromJid) values.unshift(fromJid);
+  }
+
+  const unique = Array.from(new Set(values));
+  return unique[0] || '';
+}
+
+function isBadStoredPhone(value, whatsappJid = '') {
+  const raw = clean(value);
+  if (!raw) return false;
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return false;
+  if (digits.length < 10 || digits.length > 15) return true;
+  const jid = normalizeJid(whatsappJid);
+  if (jid.includes('@lid') && digits === jidLeft(jid).replace(/\D/g, '')) return true;
+  return false;
+}
+
+function fallbackName(phone, remoteJid) {
+  if (phone) return `Contato ${phone}`;
+  const domain = jidDomain(remoteJid);
+  if (domain && domain !== 'lid') return `Contato ${jidLeft(remoteJid) || 'WhatsApp'}`;
+  return 'Contato WhatsApp';
 }
 
 function extractMessageText(item) {
@@ -309,8 +375,8 @@ function publicLead(lead) {
   const status = normalizeStatus(lead.status);
   return {
     id: lead.id,
-    nome: lead.nome || '',
-    telefone: lead.telefone || '',
+    nome: isSelfOrBadName(lead.nome) ? fallbackName(lead.telefone, lead.whatsappJid) : lead.nome || '',
+    telefone: isBadStoredPhone(lead.telefone, lead.whatsappJid) ? '' : lead.telefone || '',
     email: lead.email || '',
     pessoaTipo: lead.pessoaTipo || lead.tipoPessoa || '',
     cnpjOuPf: lead.cnpjOuPf || lead.cnpj || lead.cpf || '',
@@ -337,7 +403,7 @@ function publicLead(lead) {
 
 function findLeadIndex(leads, instanceName, remoteJid, phone = '') {
   const normalizedJid = normalizeJid(remoteJid);
-  const phoneDigits = normalizePhone(phone || jidLeft(remoteJid));
+  const phoneDigits = normalizePhone(phone || '');
   return leads.findIndex((lead) => {
     if (clean(lead.instanceName) !== clean(instanceName)) return false;
     if (normalizedJid && normalizeJid(lead.whatsappJid || '') === normalizedJid) return true;
@@ -350,11 +416,26 @@ function findLeadIndex(leads, instanceName, remoteJid, phone = '') {
 function shouldReplaceName(currentName, newName) {
   const current = clean(currentName);
   const next = clean(newName);
-  if (!next) return false;
+  if (!isUsefulName(next)) return false;
   if (!current) return true;
-  if (/^contato\s+\d+/i.test(current)) return true;
+  if (isSelfOrBadName(current)) return true;
+  if (/^contato\s+\d{12,}/i.test(current)) return true;
+  if (/^contato\s+whatsapp$/i.test(current)) return true;
   if (current.includes('@lid')) return true;
   return false;
+}
+
+function cleanLeadName(currentName, incomingName, phone, remoteJid) {
+  if (shouldReplaceName(currentName, incomingName)) return incomingName;
+  if (isUsefulName(currentName)) return clean(currentName);
+  if (isUsefulName(incomingName)) return clean(incomingName);
+  return fallbackName(phone, remoteJid);
+}
+
+function cleanLeadPhone(currentPhone, incomingPhone, remoteJid) {
+  if (incomingPhone) return incomingPhone;
+  if (isBadStoredPhone(currentPhone, remoteJid)) return '';
+  return normalizePhone(currentPhone) || '';
 }
 
 async function fetchRecentChats(instanceName, limit) {
@@ -393,19 +474,24 @@ function syncChatIntoLead(leads, client, chat) {
   const profilePic = extractProfilePic(chat);
   const lastMessage = extractMessageText(chat);
   const lastMessageAt = extractDate(chat);
-  const phone = remoteJid.includes('@s.whatsapp.net') ? normalizePhone(jidLeft(remoteJid)) : normalizePhone(jidLeft(remoteJid));
+  const phone = extractPhone(chat, remoteJid);
   const index = findLeadIndex(leads, client.instanceName, remoteJid, phone);
   const now = new Date().toISOString();
+
+  if (!name && !phone && !lastMessage && remoteJid.includes('@lid')) {
+    return { skipped: true, reason: 'empty_lid_chat_ignored', remoteJid };
+  }
 
   if (index >= 0) {
     const current = leads[index];
     const nextStatus = normalizeStatus(current.status || 'novo');
+    const nextPhone = cleanLeadPhone(current.telefone, phone, remoteJid);
     leads[index] = {
       ...current,
       externalId: current.externalId || `whatsapp:${remoteJid}`,
       whatsappJid: current.whatsappJid || remoteJid,
-      nome: shouldReplaceName(current.nome, name) ? name : (current.nome || name || `Contato ${phone || jidLeft(remoteJid) || 'WhatsApp'}`),
-      telefone: current.telefone || phone || jidLeft(remoteJid),
+      nome: cleanLeadName(current.nome, name, nextPhone, remoteJid),
+      telefone: nextPhone,
       profilePictureUrl: current.profilePictureUrl || profilePic || '',
       status: nextStatus,
       origem: current.origem || 'WhatsApp',
@@ -422,8 +508,8 @@ function syncChatIntoLead(leads, client, chat) {
     instanceName: client.instanceName,
     externalId: `whatsapp:${remoteJid}`,
     whatsappJid: remoteJid,
-    nome: name || `Contato ${phone || jidLeft(remoteJid) || 'WhatsApp'}`,
-    telefone: phone || jidLeft(remoteJid),
+    nome: cleanLeadName('', name, phone, remoteJid),
+    telefone: phone,
     email: '',
     pessoaTipo: '',
     tipoPessoa: '',
@@ -527,7 +613,9 @@ function readSyncEvents(req, res) {
     const token = tokenFromRequest(req);
     const client = findClientByToken(token);
     if (!client) return send(res, 403, { ok: false, error: 'Token inválido ou inativo.', version: VERSION });
-    const events = loadArray(SYNC_LOG_FILE).filter((item) => clean(item.client?.instanceName || item.client?.instanceName || item.instanceName).toLowerCase() === clean(client.instanceName).toLowerCase()).slice(0, 30);
+    const events = loadArray(SYNC_LOG_FILE)
+      .filter((item) => clean(item.client?.instanceName || item.instanceName).toLowerCase() === clean(client.instanceName).toLowerCase())
+      .slice(0, 30);
     return send(res, 200, { ok: true, client: publicClient(client), count: events.length, events, version: VERSION });
   } catch (error) {
     return send(res, 500, { ok: false, error: error.message || 'Erro ao ler sincronizações recentes.', version: VERSION });
@@ -548,6 +636,7 @@ function register(app) {
     clientsFile: CLIENTS_FILE,
     leadsFile: LEADS_FILE,
     syncLogFile: SYNC_LOG_FILE,
+    cleanup: 'Ignora nomes como Você e não usa IDs @lid como telefone.',
     time: new Date().toISOString()
   }));
   app.get('/api/crm/sync-recent-conversations-browser', syncRecentConversations);
