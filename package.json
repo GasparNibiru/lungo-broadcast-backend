@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node -r ./src/crm-sync-routes.js -r ./src/crm-sync-browser-get.js -r ./src/crm-label-webhook.js -r ./src/crm-label-webhook-v2.js -r ./src/crm-label-webhook-v2-events.js -r ./src/crm-evolution-capture.js -r ./src/crm-auto-conversations.js -r ./src/crm-recent-sync.js -r ./src/clientes-routes.js -r ./src/admin-client-cleanup.js src/start.js",
+    "start": "node -r ./src/crm-sync-routes.js -r ./src/crm-sync-browser-get.js -r ./src/crm-label-webhook.js -r ./src/crm-label-webhook-v2.js -r ./src/crm-label-webhook-v2-events.js -r ./src/crm-evolution-capture.js -r ./src/crm-auto-conversations.js -r ./src/crm-recent-sync.js -r ./src/clientes-routes-loader.js -r ./src/admin-client-cleanup.js src/start.js",
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
