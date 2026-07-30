@@ -14,13 +14,7 @@ const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'c
 const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'customer_clients.json');
 const RENEWAL_ALERT_DAYS = Number(process.env.CLIENT_RENEWAL_ALERT_DAYS || 40);
 
-const STATUS_LABELS = {
-  ativo: 'Ativo',
-  a_renovar: 'A renovar',
-  renovado: 'Renovado',
-  cancelado: 'Cancelado',
-  inativo: 'Inativo'
-};
+const STATUS_LABELS = { ativo: 'Ativo', a_renovar: 'A renovar', renovado: 'Renovado', cancelado: 'Cancelado', inativo: 'Inativo' };
 
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -130,7 +124,8 @@ function normalizeSale(item = {}) {
 function normalizedSales(item) {
   const sales = Array.isArray(item.vendasBase) ? item.vendasBase : [];
   return sales.map(normalizeSale).filter((sale) => sale.produto || sale.valor || sale.qtdVidas);
-}\nfunction publicCustomer(item) {
+}
+function publicCustomer(item) {
   const status = effectiveStatus(item);
   const renewal = nextRenewalDate(item);
   const vendasBase = normalizedSales(item);
@@ -187,10 +182,7 @@ function periodFilter(item, period, fromRaw, toRaw) {
   }
   return true;
 }
-function monthKey(value) {
-  const date = dateOnly(value);
-  return date ? date.slice(0, 7) : 'Sem data';
-}
+function monthKey(value) { const date = dateOnly(value); return date ? date.slice(0, 7) : 'Sem data'; }
 function metrics(items) {
   const totalVidas = items.reduce((sum, item) => sum + Number(item.qtdVidas || 0), 0);
   const faturamentoTotal = items.reduce((sum, item) => sum + moneyNumber(item.valorFechado), 0);
