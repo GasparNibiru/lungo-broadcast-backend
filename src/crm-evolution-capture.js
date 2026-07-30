@@ -1,5 +1,5 @@
 // Diagnostic Evolution webhook capture.
-// Captures broad Evolution events to verify whether the instance is delivering webhooks after persistence changes.
+// Captures broad Evolution events and inspects nested payloads without storing message text.
 
 const fs = require('fs');
 const path = require('path');
@@ -7,11 +7,14 @@ const axios = require('axios');
 const realExpress = require('express');
 
 let registered = false;
-const VERSION = '1.8.5-evolution-capture';
+const VERSION = '1.8.6-evolution-capture-deep-labels';
 
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
-const CAPTURE_LOG_FILE = process.env.CRM_EVOLUTION_CAPTURE_LOG_FILE || path.join(ROOT, 'data', 'evolution_capture_events.json');
+const DEFAULT_CAPTURE_LOG_FILE = process.env.LEADS_FILE_PATH
+  ? path.join(path.dirname(process.env.LEADS_FILE_PATH), 'evolution_capture_events.json')
+  : path.join(ROOT, 'data', 'evolution_capture_events.json');
+const CAPTURE_LOG_FILE = process.env.CRM_EVOLUTION_CAPTURE_LOG_FILE || DEFAULT_CAPTURE_LOG_FILE;
 const PUBLIC_BACKEND_URL = String(process.env.PUBLIC_BACKEND_URL || process.env.API_PUBLIC_URL || 'https://lungo-disparos-app.dzpywk.easypanel.host').replace(/\/+$/, '');
 
 const DEFAULT_CAPTURE_EVENTS = [
@@ -190,8 +193,29 @@ function extractRemoteJid(body) {
   return values.find((item) => item.includes('@')) || collectStrings(body).find((item) => /@(s\.whatsapp\.net|lid|c\.us|g\.us)/i.test(item)) || values[0] || '';
 }
 
+function collectByKeyName(value, matcher, output = [], pathParts = [], seen = new Set()) {
+  if (value === null || value === undefined || typeof value !== 'object' || seen.has(value)) return output;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    value.slice(0, 20).forEach((item, index) => collectByKeyName(item, matcher, output, pathParts.concat(String(index)), seen));
+    return output;
+  }
+
+  Object.entries(value).forEach(([key, child]) => {
+    const currentPath = pathParts.concat(key);
+    const lowerKey = key.toLowerCase();
+    if (matcher(lowerKey, child)) {
+      output.push({ path: currentPath.join('.'), key, value: child });
+    }
+    collectByKeyName(child, matcher, output, currentPath, seen);
+  });
+
+  return output;
+}
+
 function extractLabelText(body) {
-  const values = [
+  const direct = [
     body?.labelId,
     body?.label_id,
     body?.label?.id,
@@ -203,16 +227,59 @@ function extractLabelText(body) {
     body?.data?.label?.name,
     body?.data?.labelName
   ].flatMap((item) => collectStrings(item)).map(clean).filter(Boolean);
-  return Array.from(new Set(values)).slice(0, 10);
+
+  const nested = collectByKeyName(body, (key) => key.includes('label'))
+    .flatMap((item) => collectStrings(item.value));
+
+  return Array.from(new Set([...direct, ...nested].map(clean).filter(Boolean))).slice(0, 30);
+}
+
+function summarizeKeyPaths(body) {
+  const interestingKeys = ['label', 'labels', 'labelid', 'labelname', 'jid', 'remotejid', 'chatid', 'pushname', 'profilename', 'profilepicurl', 'name'];
+  return collectByKeyName(body, (key) => interestingKeys.some((wanted) => key.replace(/_/g, '').includes(wanted)))
+    .map((item) => ({
+      path: item.path,
+      key: item.key,
+      type: Array.isArray(item.value) ? 'array' : typeof item.value,
+      sample: safeValue(item.value)
+    }))
+    .slice(0, 80);
+}
+
+function safeValue(value, depth = 0) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') {
+    if (value.length > 120) return `${value.slice(0, 120)}...`;
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (depth > 2) return Array.isArray(value) ? '[Array]' : '[Object]';
+
+  if (Array.isArray(value)) return value.slice(0, 3).map((item) => safeValue(item, depth + 1));
+
+  const blockedKeys = ['apikey', 'apiKey', 'message', 'conversation', 'extendedTextMessage', 'imageMessage', 'audioMessage', 'videoMessage', 'documentMessage'];
+  const result = {};
+  Object.entries(value).slice(0, 30).forEach(([key, child]) => {
+    if (blockedKeys.includes(key)) {
+      result[key] = '[redacted]';
+    } else {
+      result[key] = safeValue(child, depth + 1);
+    }
+  });
+  return result;
 }
 
 function payloadShape(body) {
+  const data = body?.data;
+  const dataZero = Array.isArray(data) ? data[0] : data?.[0];
   return {
     topLevelKeys: body && typeof body === 'object' ? Object.keys(body).slice(0, 30) : [],
-    dataKeys: body?.data && typeof body.data === 'object' ? Object.keys(body.data).slice(0, 30) : [],
-    hasMessage: !!(body?.message || body?.data?.message || body?.data?.messageType),
-    hasContact: !!(body?.contact || body?.data?.contact || body?.data?.Contact),
-    hasLabels: !!(body?.labels || body?.data?.labels || body?.label || body?.data?.label)
+    dataIsArray: Array.isArray(data),
+    dataKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 30) : [],
+    data0Keys: dataZero && typeof dataZero === 'object' ? Object.keys(dataZero).slice(0, 40) : [],
+    hasMessage: !!(body?.message || body?.data?.message || body?.data?.messageType || dataZero?.message || dataZero?.messageType),
+    hasContact: !!(body?.contact || body?.data?.contact || body?.data?.Contact || dataZero?.contact || dataZero?.Contact),
+    hasLabels: !!(body?.labels || body?.data?.labels || body?.label || body?.data?.label || dataZero?.labels || dataZero?.label)
   };
 }
 
@@ -242,6 +309,7 @@ async function handleCapture(req, res) {
     const client = findClientByInstance(instanceName);
     const eventName = clean(req.params?.eventName || body.event || body.type || body?.data?.event || body?.data?.type || 'unknown');
     const remoteJid = extractRemoteJid(body);
+    const labelCandidates = extractLabelText(body);
     const summary = {
       accepted: !!client,
       reason: client ? '' : 'instance_not_registered_or_missing',
@@ -250,8 +318,11 @@ async function handleCapture(req, res) {
       eventName,
       route: req.path,
       remoteJid,
-      labelCandidates: extractLabelText(body),
-      payloadShape: payloadShape(body)
+      labelCandidates,
+      likelyMiniCrmLabel: labelCandidates.some((item) => String(item).toLowerCase().replace(/\s+/g, '') === 'minicrm' || String(item) === '5'),
+      payloadShape: payloadShape(body),
+      keyPaths: summarizeKeyPaths(body),
+      safePreview: safeValue(body)
     };
 
     logCapture(summary);
@@ -292,15 +363,32 @@ function readCaptureEvents(req, res) {
     const client = findClientByToken(token);
     if (!client) return send(res, 403, { ok: false, error: 'Token inválido ou inativo.', version: VERSION });
 
+    const includePreview = clean(req.query.preview).toLowerCase() === '1' || clean(req.query.preview).toLowerCase() === 'true';
     const events = loadArray(CAPTURE_LOG_FILE)
       .filter((item) => clean(item.instanceName).toLowerCase() === clean(client.instanceName).toLowerCase())
-      .slice(0, 50);
+      .slice(0, 20)
+      .map((item) => includePreview ? item : {
+        time: item.time,
+        accepted: item.accepted,
+        reason: item.reason,
+        instanceName: item.instanceName,
+        clientName: item.clientName,
+        eventName: item.eventName,
+        route: item.route,
+        remoteJid: item.remoteJid,
+        labelCandidates: item.labelCandidates,
+        likelyMiniCrmLabel: item.likelyMiniCrmLabel,
+        payloadShape: item.payloadShape,
+        keyPaths: item.keyPaths
+      });
 
     return send(res, 200, {
       ok: true,
       client: publicClient(client),
       count: events.length,
       accepted: events.filter((item) => item.accepted).length,
+      withLabels: events.filter((item) => Array.isArray(item.labelCandidates) && item.labelCandidates.length > 0).length,
+      likelyMiniCrm: events.filter((item) => item.likelyMiniCrmLabel).length,
       logFile: CAPTURE_LOG_FILE,
       events,
       version: VERSION
