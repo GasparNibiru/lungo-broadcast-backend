@@ -1,5 +1,5 @@
 // Browser-friendly MiniCRM sync route.
-// Direct GET /api/crm/sync-whatsapp-label-browser for browser tests.
+// Uses the same token validation path as /api/crm/whatsapp/labels, then syncs chats marked with MiniCRM.
 
 const fs = require('fs');
 const path = require('path');
@@ -8,7 +8,7 @@ const axios = require('axios');
 const realExpress = require('express');
 
 let registered = false;
-const VERSION = '1.7.2-browser-direct';
+const VERSION = '1.7.3-browser-label-validation';
 
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
@@ -32,7 +32,7 @@ function clean(value) {
 }
 
 function cleanToken(value) {
-  return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+  return clean(value).toUpperCase().replace(/\s+/g, '');
 }
 
 function slugify(value) {
@@ -84,12 +84,6 @@ function saveJsonArray(filePath, items) {
   fs.writeFileSync(filePath, `${JSON.stringify(items, null, 2)}\n`, 'utf8');
 }
 
-function findClientByToken(token) {
-  const clean = cleanToken(token);
-  if (!clean) return null;
-  return loadJsonArray(CLIENTS_FILE).find((item) => cleanToken(item.token) === clean && item.ativo !== false) || null;
-}
-
 function publicClient(client) {
   return {
     nome: client.nome || client.instanceName,
@@ -124,6 +118,32 @@ function buildEvolutionUrl(template, instanceName) {
 function ensureEvolutionConfig() {
   if (!evolutionBaseUrl()) throw new Error('EVOLUTION_BASE_URL não configurado.');
   if (!process.env.EVOLUTION_API_KEY) throw new Error('EVOLUTION_API_KEY não configurado.');
+}
+
+function localBaseUrl() {
+  if (process.env.CRM_SYNC_INTERNAL_URL) return process.env.CRM_SYNC_INTERNAL_URL.replace(/\/+$/, '');
+  const port = process.env.PORT || 80;
+  return `http://127.0.0.1:${port}`;
+}
+
+async function getClientAndLabelsByExistingRoute(token) {
+  const url = `${localBaseUrl()}/api/crm/whatsapp/labels?token=${encodeURIComponent(token)}`;
+  const response = await axios.get(url, { timeout: 60000, validateStatus: () => true });
+  if (response.status >= 200 && response.status < 300 && response.data?.ok && response.data?.client) {
+    return {
+      ok: true,
+      client: response.data.client,
+      labels: Array.isArray(response.data.labels) ? response.data.labels : [],
+      source: 'existing-labels-route'
+    };
+  }
+  return { ok: false, status: response.status, data: response.data || null };
+}
+
+function findClientByTokenFallback(token) {
+  const normalized = cleanToken(token);
+  if (!normalized) return null;
+  return loadJsonArray(CLIENTS_FILE).find((item) => cleanToken(item.token) === normalized && item.ativo !== false) || null;
 }
 
 async function findEvolutionLabels(instanceName) {
@@ -301,42 +321,56 @@ async function syncByBrowser(req, res) {
     const labelName = clean(req.query.labelName || req.query.label || DEFAULT_LABEL) || DEFAULT_LABEL;
     const limit = Number(req.query.limit || DEFAULT_SYNC_LIMIT);
 
-    if (!token) return send(res, 400, { ok: false, error: 'Informe o token na URL.', via: 'browser-direct', proxyVersion: VERSION });
+    if (!token) return send(res, 400, { ok: false, error: 'Informe o token na URL.', via: 'browser-label-validation', proxyVersion: VERSION });
 
-    const client = findClientByToken(token);
+    let validation = await getClientAndLabelsByExistingRoute(token);
+    let client = validation.ok ? validation.client : null;
+    let labels = validation.ok ? validation.labels : [];
+    let validationSource = validation.source || 'existing-labels-route-failed';
+
+    if (!client) {
+      const fallbackClient = findClientByTokenFallback(token);
+      if (fallbackClient) {
+        client = publicClient(fallbackClient);
+        labels = await findEvolutionLabels(client.instanceName);
+        validationSource = 'fallback-clientes-json';
+      }
+    }
+
     if (!client) {
       return send(res, 403, {
         ok: false,
-        error: 'Token inválido ou inativo.',
-        hint: 'Confirme se o token está completo na URL. Se tiver caracteres especiais, copie direto da página Admin e cole depois de ?token=',
-        via: 'browser-direct',
+        error: 'Token inválido ou inativo nesta rota de sync.',
+        hint: 'O token funcionou na rota de etiquetas, então use o mesmo valor exatamente depois de ?token=. Esta versão também tentou validar pela rota de etiquetas.',
+        labelsRouteStatus: validation.status || null,
+        labelsRouteError: validation.data?.error || null,
+        via: 'browser-label-validation',
         proxyVersion: VERSION
       });
     }
 
-    const labels = await findEvolutionLabels(client.instanceName);
     const targetLabel = findTargetLabel(labels, labelName);
-
     if (!targetLabel) {
       return send(res, 404, {
         ok: false,
         error: `Etiqueta "${labelName}" não encontrada no WhatsApp conectado.`,
         labels,
         labelNames: labels.map((item) => item?.name || item?.label || item?.title || item?.id).filter(Boolean),
-        via: 'browser-direct',
+        validationSource,
+        via: 'browser-label-validation',
         proxyVersion: VERSION
       });
     }
 
     const chats = await findEvolutionChats(client.instanceName, limit);
-    const matchedChats = chats.filter((chat) => chatHasLabel(chat, labelName, targetLabel));
+    const matchedChats = chats.filter((chat) => chatHasLabel(chat, targetLabel.name || labelName, targetLabel) || chatHasLabel(chat, labelName, targetLabel));
     const leads = loadJsonArray(LEADS_FILE);
     const result = upsertLeadsFromChats(leads, client, matchedChats, targetLabel.name || labelName);
     saveJsonArray(LEADS_FILE, leads);
 
     return send(res, 200, {
       ok: true,
-      client: publicClient(client),
+      client,
       labelName: targetLabel.name || labelName,
       label: targetLabel,
       scannedChats: chats.length,
@@ -345,7 +379,8 @@ async function syncByBrowser(req, res) {
       updated: result.updated,
       ignored: result.ignored,
       warning: matchedChats.length === 0 ? 'A etiqueta existe, mas as conversas retornadas pela Evolution não vieram com esse label vinculado. Próximo passo: testar busca por labelId.' : null,
-      via: 'browser-direct',
+      validationSource,
+      via: 'browser-label-validation',
       proxyVersion: VERSION
     });
   } catch (error) {
@@ -353,7 +388,7 @@ async function syncByBrowser(req, res) {
       ok: false,
       error: error.message || 'Erro ao sincronizar MiniCRM pelo navegador.',
       details: error.response?.data || null,
-      via: 'browser-direct',
+      via: 'browser-label-validation',
       proxyVersion: VERSION
     });
   }
