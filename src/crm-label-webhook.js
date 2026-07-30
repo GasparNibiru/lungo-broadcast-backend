@@ -8,7 +8,7 @@ const axios = require('axios');
 const realExpress = require('express');
 
 let registered = false;
-const VERSION = '1.8.0-label-webhook';
+const VERSION = '1.8.1-webhook-payload';
 
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
@@ -20,7 +20,7 @@ const PUBLIC_BACKEND_URL = String(process.env.PUBLIC_BACKEND_URL || process.env.
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-client-token');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-client-token, x-crm-label-secret');
 }
 
 function send(res, status, payload) {
@@ -162,11 +162,16 @@ async function setEvolutionWebhook(instanceName, webhookUrl) {
     .filter(Boolean);
 
   const payload = {
-    enabled: true,
-    url: webhookUrl,
-    events,
-    headers: {},
-    base64: false
+    webhook: {
+      enabled: true,
+      url: webhookUrl,
+      byEvents: true,
+      webhookByEvents: true,
+      webhook_by_events: true,
+      events,
+      headers: {},
+      base64: false
+    }
   };
 
   const response = await axios.post(url, payload, {
@@ -471,8 +476,9 @@ async function configureWebhook(req, res) {
       ok: result.status >= 200 && result.status < 300,
       client: publicClient(client),
       webhookUrl: maskUrl(webhookUrl),
-      events: result.payload.events,
+      events: result.payload.webhook.events,
       evolutionStatus: result.status,
+      evolutionPayloadShape: 'webhook_object',
       evolutionResponse: result.data,
       version: VERSION
     });
