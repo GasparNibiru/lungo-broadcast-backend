@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node -r ./src/crm-sync-routes.js -r ./src/crm-sync-browser-get.js -r ./src/crm-label-webhook.js -r ./src/crm-label-webhook-v2.js -r ./src/crm-label-webhook-v2-events.js -r ./src/crm-evolution-capture.js -r ./src/crm-auto-conversations-loader.js -r ./src/crm-recent-sync-loader.js -r ./src/clientes-routes-loader.js -r ./src/clientes-products-routes.js -r ./src/clientes-products-doc-delete.js -r ./src/admin-master-routes.js -r ./src/admin-master-panel-v2.js -r ./src/admin-client-cleanup.js -r ./src/scheduled-followups.js src/start.js",
+    "start": "node -r ./src/crm-sync-routes.js -r ./src/crm-sync-browser-get.js -r ./src/crm-label-webhook.js -r ./src/crm-label-webhook-v2.js -r ./src/crm-label-webhook-v2-events.js -r ./src/crm-evolution-capture.js -r ./src/crm-auto-conversations-loader.js -r ./src/crm-recent-sync-loader.js -r ./src/clientes-routes-loader.js -r ./src/clientes-products-routes.js -r ./src/clientes-products-doc-delete.js -r ./src/admin-master-routes.js -r ./src/admin-master-panel-v2.js -r ./src/admin-master-control-v2.js -r ./src/admin-client-cleanup.js -r ./src/scheduled-followups.js src/start.js",
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
