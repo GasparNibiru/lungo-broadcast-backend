@@ -1,5 +1,5 @@
 // Safe loader for crm-auto-conversations.js.
-// Tightens automatic lead capture so invalid @lid-only or junk contacts are ignored.
+// Tightens automatic lead capture so invalid @lid-only or junk contacts are ignored and exposes scheduled messages.
 
 const fs = require('fs');
 const path = require('path');
@@ -8,9 +8,10 @@ const Module = require('module');
 const target = path.join(__dirname, 'crm-auto-conversations.js');
 let source = fs.readFileSync(target, 'utf8');
 
-source = source.replace("const VERSION = '2.0.0-auto-crm-pipeline';", "const VERSION = '2.0.1-auto-crm-clean-leads';");
+source = source.replace("const VERSION = '2.0.0-auto-crm-pipeline';", "const VERSION = '2.0.2-auto-crm-clean-leads-schedule';");
 source = source.replace('const phoneFallback = phoneFromJid || normalizePhone(jidLeft(normalizedJid));', 'const phoneFallback = phoneFromJid;');
 source = source.replace('telefone: base.telefone || phoneFromJid || phoneFallback || jidLeft(normalizedJid),', "telefone: base.telefone || phoneFromJid || phoneFallback || '',");
+source = source.replace('archivedAt: lead.archivedAt || null,', 'archivedAt: lead.archivedAt || null,\n    mensagemProgramada: lead.mensagemProgramada || null,');
 
 const helper = `
 function isBadAutoName(value) {
