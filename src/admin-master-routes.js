@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const realExpress = require('express');
 
 let registered = false;
-const VERSION = '1.0.0-admin-master-mvp';
+const VERSION = '1.1.0-admin-master-separated-panel';
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
 const LEADS_FILE = process.env.LEADS_FILE_PATH || path.join(ROOT, 'data', 'leads.json');
@@ -144,6 +144,11 @@ function publicClient(item) {
     token: item.token || '',
     instanceName: item.instanceName || '',
     whatsapp: item.whatsapp || item.telefone || '',
+    email: item.email || '',
+    plano: item.plano || item.plan || '',
+    observacao: item.observacao || item.observacoes || item.notes || '',
+    linkAcesso: item.linkAcesso || item.accessUrl || item.urlAcesso || '',
+    mensagemEnvio: item.mensagemEnvio || item.mensagemDeEnvio || item.accessMessage || '',
     ativo: item.ativo !== false,
     createdAt: item.createdAt || '',
     updatedAt: item.updatedAt || '',
@@ -216,6 +221,11 @@ async function createClientRoute(req, res) {
     let token = cleanToken(body.token) || generateToken();
     let instanceName = clean(body.instanceName) || generateInstanceName(nome);
     const whatsapp = clean(body.whatsapp || body.telefone || '');
+    const email = clean(body.email || '');
+    const plano = clean(body.plano || body.plan || '');
+    const observacao = clean(body.observacao || body.observacoes || body.notes || '');
+    const linkAcesso = clean(body.linkAcesso || body.accessUrl || body.urlAcesso || '');
+    const mensagemEnvio = clean(body.mensagemEnvio || body.mensagemDeEnvio || body.accessMessage || '');
     const clients = loadArray(CLIENTS_FILE);
     const tokenExists = (value) => clients.some((client) => cleanToken(client.token) === cleanToken(value));
     const instanceExists = (value) => clients.some((client) => clean(client.instanceName) === clean(value));
@@ -224,7 +234,7 @@ async function createClientRoute(req, res) {
     if (tokenExists(token)) throw Object.assign(new Error('Token já existe. Gere outro token.'), { statusCode: 409 });
     if (instanceExists(instanceName)) throw Object.assign(new Error('Instância já existe. Informe outro nome de instância.'), { statusCode: 409 });
     const now = new Date().toISOString();
-    const client = { id: generateId('cliente'), nome, token, instanceName, whatsapp, ativo: true, createdAt: now, updatedAt: now };
+    const client = { id: generateId('cliente'), nome, token, instanceName, whatsapp, email, plano, observacao, linkAcesso, mensagemEnvio, ativo: true, createdAt: now, updatedAt: now };
     clients.push(client);
     saveArray(CLIENTS_FILE, clients);
     return send(res, 201, { ok: true, client: publicClient(client), dashboard: buildDashboard(), version: VERSION });
