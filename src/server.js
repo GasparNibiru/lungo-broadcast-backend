@@ -10,6 +10,8 @@ const crypto = require('crypto');
 
 dotenv.config();
 
+const databaseHealthRouter = require('./routes/database-health');
+
 const app = express();
 const PORT = Number(process.env.PORT || 80);
 const VERSION = '1.3.0';
@@ -33,6 +35,7 @@ app.use((req, res, next) => {
 app.use(cors({ origin: true, credentials: false }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(databaseHealthRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
