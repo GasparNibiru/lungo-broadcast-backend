@@ -18,6 +18,7 @@ const adminDashboardRouter = require('./routes/admin-dashboard');
 const adminFinancialRouter = require('./routes/admin-financial');
 const adminSupervisorsRouter = require('./routes/admin-supervisors');
 const adminAccessesRouter = require('./routes/admin-accesses');
+const adminPaymentsRouter = require('./routes/admin-payments');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -50,6 +51,7 @@ app.use(adminDashboardRouter);
 app.use(adminFinancialRouter);
 app.use(adminSupervisorsRouter);
 app.use(adminAccessesRouter);
+app.use(adminPaymentsRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
