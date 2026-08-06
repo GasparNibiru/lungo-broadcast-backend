@@ -14,6 +14,7 @@ const databaseHealthRouter = require('./routes/database-health');
 const adminSubscriptionsRouter = require('./routes/admin-subscriptions');
 const adminAuthRouter = require('./routes/admin-auth');
 const adminOrganizationsRouter = require('./routes/admin-organizations');
+const adminDashboardRouter = require('./routes/admin-dashboard');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -42,6 +43,7 @@ app.use(databaseHealthRouter);
 app.use(adminSubscriptionsRouter);
 app.use(adminAuthRouter);
 app.use(adminOrganizationsRouter);
+app.use(adminDashboardRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
