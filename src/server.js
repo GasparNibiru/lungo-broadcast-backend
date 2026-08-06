@@ -12,6 +12,7 @@ dotenv.config();
 
 const databaseHealthRouter = require('./routes/database-health');
 const adminSubscriptionsRouter = require('./routes/admin-subscriptions');
+const adminAuthRouter = require('./routes/admin-auth');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -38,6 +39,7 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(databaseHealthRouter);
 app.use(adminSubscriptionsRouter);
+app.use(adminAuthRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
