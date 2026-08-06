@@ -1,5 +1,5 @@
-const crypto = require('crypto');
 const express = require('express');
+const requireAdmin = require('../middleware/require-admin');
 const {
   listAdminOrganizations,
   updateAdminOrganization,
@@ -8,29 +8,23 @@ const {
 
 const router = express.Router();
 const ALLOWED_FIELDS = new Set([
-  'name', 'organizationType', 'status', 'planCode', 'extraAccesses',
+  'name', 'organizationType', 'planCode', 'extraAccesses',
   'legacy', 'nextDueDate', 'dueMode', 'fixedDueDay'
 ]);
 const ORGANIZATION_TYPES = new Set(['individual', 'brokerage']);
-const ORGANIZATION_STATUSES = new Set(['active', 'attention', 'suspended', 'inactive']);
 const DUE_MODES = new Set(['thirty_days', 'fixed_day']);
 const FIXED_DUE_DAYS = new Set([1, 5, 10, 15, 20, 25]);
 
-function requireAdminKey(req, res, next) {
-  const expectedKey = process.env.ADMIN_ACCESS_KEY;
-  const providedKey = req.get('x-admin-key');
-  const providedBuffer = Buffer.from(String(providedKey || ''), 'utf8');
-  const expectedBuffer = Buffer.from(String(expectedKey || ''), 'utf8');
-  const validKey = providedBuffer.length === expectedBuffer.length
-    && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
-
-  if (!expectedKey || !providedKey || !validKey) {
-    return res.status(401).json({ ok: false, error: 'Não autorizado.' });
-  }
-
-  return next();
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
 }
 
+function requireOrganizationId(req, res, next) {
+  if (!isUuid(req.params.organizationId)) {
+    return res.status(400).json({ ok: false, error: 'Identificador de organização inválido.' });
+  }
+  return next();
+}
 function isIsoDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const [year, month, day] = value.split('-').map(Number);
@@ -51,7 +45,6 @@ function validateUpdate(body) {
   }
   if (has('name') && (typeof body.name !== 'string' || !body.name.trim())) errors.push('name deve ser um texto não vazio.');
   if (has('organizationType') && !ORGANIZATION_TYPES.has(body.organizationType)) errors.push('organizationType deve ser individual ou brokerage.');
-  if (has('status') && !ORGANIZATION_STATUSES.has(body.status)) errors.push('status deve ser active, attention, suspended ou inactive.');
   if (has('planCode') && (typeof body.planCode !== 'string' || !body.planCode.trim())) errors.push('planCode deve ser um texto não vazio.');
   if (has('extraAccesses') && (!Number.isInteger(body.extraAccesses) || body.extraAccesses < 0)) errors.push('extraAccesses deve ser um número inteiro maior ou igual a zero.');
   if (has('legacy') && typeof body.legacy !== 'boolean') errors.push('legacy deve ser booleano.');
@@ -72,7 +65,7 @@ function validateUpdate(body) {
   };
 }
 
-router.get('/api/admin/organizations', requireAdminKey, async (req, res) => {
+router.get('/api/admin/organizations', requireAdmin, async (req, res) => {
   try {
     const organizations = await listAdminOrganizations();
     return res.status(200).json({ ok: true, organizations });
@@ -82,7 +75,7 @@ router.get('/api/admin/organizations', requireAdminKey, async (req, res) => {
   }
 });
 
-router.patch('/api/admin/organizations/:organizationId', requireAdminKey, async (req, res) => {
+router.patch('/api/admin/organizations/:organizationId', requireAdmin, requireOrganizationId, async (req, res) => {
   const validation = validateUpdate(req.body || {});
   if (validation.errors) return res.status(400).json({ ok: false, error: 'Dados inválidos.', details: validation.errors });
 
@@ -116,8 +109,8 @@ function organizationStatusAction(action) {
   };
 }
 
-router.post('/api/admin/organizations/:organizationId/suspend', requireAdminKey, organizationStatusAction('suspend'));
-router.post('/api/admin/organizations/:organizationId/reactivate', requireAdminKey, organizationStatusAction('reactivate'));
-router.post('/api/admin/organizations/:organizationId/cancel', requireAdminKey, organizationStatusAction('cancel'));
+router.post('/api/admin/organizations/:organizationId/suspend', requireAdmin, requireOrganizationId, organizationStatusAction('suspend'));
+router.post('/api/admin/organizations/:organizationId/reactivate', requireAdmin, requireOrganizationId, organizationStatusAction('reactivate'));
+router.post('/api/admin/organizations/:organizationId/cancel', requireAdmin, requireOrganizationId, organizationStatusAction('cancel'));
 
 module.exports = router;

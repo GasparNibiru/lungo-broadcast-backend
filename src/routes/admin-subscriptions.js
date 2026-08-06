@@ -1,27 +1,9 @@
-const crypto = require('crypto');
 const express = require('express');
 const { createAdminSubscription } = require('../services/admin-subscriptions');
+const requireAdmin = require('../middleware/require-admin');
 
 const router = express.Router();
 const FIXED_DUE_DAYS = new Set([1, 5, 10, 15, 20, 25]);
-
-function safeKeyEquals(provided, expected) {
-  const providedBuffer = Buffer.from(String(provided || ''), 'utf8');
-  const expectedBuffer = Buffer.from(String(expected || ''), 'utf8');
-  return providedBuffer.length === expectedBuffer.length
-    && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
-}
-
-function requireAdminKey(req, res, next) {
-  const expected = process.env.ADMIN_ACCESS_KEY;
-  const provided = req.get('x-admin-key');
-
-  if (!expected || !provided || !safeKeyEquals(provided, expected)) {
-    return res.status(401).json({ ok: false, error: 'Não autorizado.' });
-  }
-
-  return next();
-}
 
 function isIsoDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -92,7 +74,7 @@ function validate(body) {
   };
 }
 
-router.post('/api/admin/subscriptions', requireAdminKey, async (req, res) => {
+router.post('/api/admin/subscriptions', requireAdmin, async (req, res) => {
   const validation = validate(req.body || {});
   if (validation.errors) {
     return res.status(400).json({ ok: false, error: 'Dados inválidos.', details: validation.errors });

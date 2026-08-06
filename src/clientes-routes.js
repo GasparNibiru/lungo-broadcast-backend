@@ -103,7 +103,8 @@ function nextRenewalDate(item) {
 }
 function slug(value) {
   return clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-}\nfunction normalizeStatus(value) {
+}
+function normalizeStatus(value) {
   const raw = slug(value || 'ativo');
   const aliases = { ativo: 'ativo', cliente_ativo: 'ativo', a_renovar: 'a_renovar', renovar: 'a_renovar', renovacao: 'a_renovar', renovado: 'renovado', cancelado: 'cancelado', inativo: 'inativo' };
   return aliases[raw] || (STATUS_LABELS[raw] ? raw : 'ativo');
@@ -412,7 +413,7 @@ async function updatePostSale(req, res) {
     const body = await readBody(req); const client = requireUser(req, body); const id = clean(req.params?.id || '');
     const items = loadArray(CUSTOMER_CLIENTS_FILE); const index = items.findIndex((item) => item.id === id && clean(item.instanceName) === clean(client.instanceName));
     if (index < 0) throw Object.assign(new Error('Cliente não encontrado.'), { statusCode: 404 });
-    items[index].posVenda = { tipo: clean(body.tipo || 'relacionamento'), data: dateOnly(body.data || ''), recorrencia: clean(body.recorrencia || 'unica'), mensagem: clean(body.mensagem || ''), ativo: body.ativo !== false, updatedAt: new Date().toISOString() };
+    items[index].posVenda = { tipo: clean(body.tipo || 'relacionamento'), data: dateOnly(body.data || ''), recorrencia: clean(body.recorrencia || 'unica'), hora: clean(body.hora || body.hour || '09:00'), mensagem: clean(body.mensagem || ''), ativo: body.ativo !== false, updatedAt: new Date().toISOString() };
     items[index].updatedAt = new Date().toISOString(); saveArray(CUSTOMER_CLIENTS_FILE, items);
     return send(res, 200, { ok: true, cliente: publicCustomer(items[index]), version: VERSION });
   } catch (error) { return send(res, error.statusCode || 500, { ok: false, error: error.message || 'Erro ao salvar pós-venda.', version: VERSION }); }

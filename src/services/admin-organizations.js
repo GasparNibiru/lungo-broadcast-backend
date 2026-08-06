@@ -133,8 +133,8 @@ async function updateAdminOrganization(organizationId, input) {
     p_has_name: has('name'),
     p_organization_type: input.organizationType ?? null,
     p_has_organization_type: has('organizationType'),
-    p_status: input.status ?? null,
-    p_has_status: has('status'),
+    p_status: null,
+    p_has_status: false,
     p_plan_code: input.planCode ?? null,
     p_has_plan_code: has('planCode'),
     p_extra_accesses: input.extraAccesses ?? null,
@@ -169,6 +169,9 @@ async function changeAdminOrganizationSubscriptionStatus(organizationId, action)
   });
 
   if (error) {
+    if (error.code === 'P0001' && error.message === 'cancelled_subscription_terminal') {
+      throw new AdminOrganizationError('Assinatura cancelada não pode ser reativada.', 409);
+    }
     if (error.code === 'P0002' && error.message === 'organization_not_found') {
       throw new AdminOrganizationError('Organização não encontrada.', 404);
     }
