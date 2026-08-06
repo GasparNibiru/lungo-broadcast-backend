@@ -162,4 +162,38 @@ async function updateAdminOrganization(organizationId, input) {
   return data;
 }
 
-module.exports = { AdminOrganizationError, listAdminOrganizations, updateAdminOrganization };
+async function changeAdminOrganizationSubscriptionStatus(organizationId, action) {
+  const { data, error } = await supabase.rpc('change_admin_organization_subscription_status', {
+    p_organization_id: organizationId,
+    p_action: action
+  });
+
+  if (error) {
+    if (error.code === 'P0002' && error.message === 'organization_not_found') {
+      throw new AdminOrganizationError('Organização não encontrada.', 404);
+    }
+    if (error.code === 'P0002' && error.message === 'subscription_not_found') {
+      throw new AdminOrganizationError(
+        action === 'reactivate'
+          ? 'Não é possível reativar uma organização sem assinatura.'
+          : 'Organização sem assinatura para esta operação.',
+        action === 'reactivate' ? 409 : 400
+      );
+    }
+    if (error.code === '22023' || error.code === '22P02') {
+      throw new AdminOrganizationError('Estado inválido para esta operação.', 400);
+    }
+
+    console.error('[ADMIN ORGANIZATION STATUS DATABASE ERROR]', { code: error.code, message: error.message });
+    throw new AdminOrganizationError('Não foi possível alterar o status.', 500);
+  }
+
+  return data;
+}
+
+module.exports = {
+  AdminOrganizationError,
+  listAdminOrganizations,
+  updateAdminOrganization,
+  changeAdminOrganizationSubscriptionStatus
+};

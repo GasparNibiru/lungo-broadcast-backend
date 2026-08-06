@@ -1,7 +1,9 @@
+const crypto = require('crypto');
 const express = require('express');
 const {
   listAdminOrganizations,
-  updateAdminOrganization
+  updateAdminOrganization,
+  changeAdminOrganizationSubscriptionStatus
 } = require('../services/admin-organizations');
 
 const router = express.Router();
@@ -15,17 +17,14 @@ const DUE_MODES = new Set(['thirty_days', 'fixed_day']);
 const FIXED_DUE_DAYS = new Set([1, 5, 10, 15, 20, 25]);
 
 function requireAdminKey(req, res, next) {
-  const expectedKey = String(process.env.ADMIN_ACCESS_KEY || '').trim();
-  const providedKey = String(req.get('x-admin-key') || '').trim();
+  const expectedKey = process.env.ADMIN_ACCESS_KEY;
+  const providedKey = req.get('x-admin-key');
+  const providedBuffer = Buffer.from(String(providedKey || ''), 'utf8');
+  const expectedBuffer = Buffer.from(String(expectedKey || ''), 'utf8');
+  const validKey = providedBuffer.length === expectedBuffer.length
+    && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 
-  if (!expectedKey) {
-    return res.status(500).json({
-      ok: false,
-      error: 'Configuração administrativa ausente.'
-    });
-  }
-
-  if (!providedKey || providedKey !== expectedKey) {
+  if (!expectedKey || !providedKey || !validKey) {
     return res.status(401).json({ ok: false, error: 'Não autorizado.' });
   }
 
@@ -96,5 +95,29 @@ router.patch('/api/admin/organizations/:organizationId', requireAdminKey, async 
     return res.status(statusCode).json({ ok: false, error: statusCode === 500 ? 'Erro interno no servidor.' : error.message });
   }
 });
+
+function organizationStatusAction(action) {
+  return async (req, res) => {
+    try {
+      const result = await changeAdminOrganizationSubscriptionStatus(req.params.organizationId, action);
+      return res.status(200).json({
+        ok: true,
+        organization: result.organization,
+        subscription: result.subscription
+      });
+    } catch (error) {
+      const statusCode = [400, 404, 409].includes(error.statusCode) ? error.statusCode : 500;
+      if (statusCode === 500) console.error('[ADMIN ORGANIZATION STATUS ERROR]', error.message || error);
+      return res.status(statusCode).json({
+        ok: false,
+        error: statusCode === 500 ? 'Erro interno no servidor.' : error.message
+      });
+    }
+  };
+}
+
+router.post('/api/admin/organizations/:organizationId/suspend', requireAdminKey, organizationStatusAction('suspend'));
+router.post('/api/admin/organizations/:organizationId/reactivate', requireAdminKey, organizationStatusAction('reactivate'));
+router.post('/api/admin/organizations/:organizationId/cancel', requireAdminKey, organizationStatusAction('cancel'));
 
 module.exports = router;
