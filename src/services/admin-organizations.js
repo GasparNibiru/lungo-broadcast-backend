@@ -117,4 +117,49 @@ async function listAdminOrganizations() {
   return (data || []).map(mapOrganization);
 }
 
-module.exports = { listAdminOrganizations };
+class AdminOrganizationError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.name = 'AdminOrganizationError';
+    this.statusCode = statusCode;
+  }
+}
+
+async function updateAdminOrganization(organizationId, input) {
+  const has = (field) => Object.prototype.hasOwnProperty.call(input, field);
+  const { data, error } = await supabase.rpc('update_admin_organization', {
+    p_organization_id: organizationId,
+    p_name: input.name ?? null,
+    p_has_name: has('name'),
+    p_organization_type: input.organizationType ?? null,
+    p_has_organization_type: has('organizationType'),
+    p_status: input.status ?? null,
+    p_has_status: has('status'),
+    p_plan_code: input.planCode ?? null,
+    p_has_plan_code: has('planCode'),
+    p_extra_accesses: input.extraAccesses ?? null,
+    p_has_extra_accesses: has('extraAccesses'),
+    p_legacy: input.legacy ?? null,
+    p_has_legacy: has('legacy'),
+    p_next_due_date: input.nextDueDate ?? null,
+    p_has_next_due_date: has('nextDueDate'),
+    p_due_mode: input.dueMode ?? null,
+    p_has_due_mode: has('dueMode'),
+    p_fixed_due_day: input.fixedDueDay ?? null,
+    p_has_fixed_due_day: has('fixedDueDay')
+  });
+
+  if (error) {
+    if (error.code === 'P0002' && error.message === 'organization_not_found') throw new AdminOrganizationError('Organização não encontrada.', 404);
+    if (error.code === 'P0002' && error.message === 'plan_not_found') throw new AdminOrganizationError('Plano não encontrado.', 400);
+    if (error.code === 'P0002' && error.message === 'active_subscription_not_found') throw new AdminOrganizationError('Assinatura ativa não encontrada.', 404);
+    if (error.code === '22023' || error.code === '22P02') throw new AdminOrganizationError('Dados inválidos.', 400);
+
+    console.error('[ADMIN ORGANIZATION UPDATE DATABASE ERROR]', { code: error.code, message: error.message });
+    throw new AdminOrganizationError('Não foi possível atualizar a organização.', 500);
+  }
+
+  return data;
+}
+
+module.exports = { AdminOrganizationError, listAdminOrganizations, updateAdminOrganization };
