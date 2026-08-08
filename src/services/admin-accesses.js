@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const supabase = require('../database/supabase');
+const tokenVault = require('./access-token-vault');
 
 const ACCESS_SELECT = `
   id,
@@ -24,7 +25,8 @@ class AdminAccessError extends Error {
 }
 
 function generateToken() {
-  return crypto.randomBytes(32).toString('base64url');
+  // 72 bits of entropy in a compact, human-friendly 16-character token.
+  return `LNG-${crypto.randomBytes(9).toString('base64url')}`;
 }
 
 function hashToken(token) {
@@ -38,7 +40,7 @@ function currentToken(tokens) {
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || null;
 }
 
-function mapAccess(user) {
+function mapAccess(user, storedToken = null) {
   const token = currentToken(user.access_tokens);
   return {
     user_id: user.id,
@@ -52,6 +54,7 @@ function mapAccess(user) {
     last_login_at: user.last_login_at,
     created_at: user.created_at,
     active_token: Boolean(token),
+    token: token ? storedToken : null,
     token_expires_at: token?.expires_at || null,
     token_last_used_at: token?.last_used_at || null
   };
@@ -85,17 +88,19 @@ async function getAccess(userId) {
   const { data, error } = await supabase.from('users').select(ACCESS_SELECT).eq('id', userId).maybeSingle();
   if (error) throw databaseError('get access', error);
   if (!data) throw new AdminAccessError('Usuário não encontrado.', 404);
-  return mapAccess(data);
+  return mapAccess(data, await tokenVault.get(userId));
 }
 
 async function listAdminAccesses() {
   const { data, error } = await supabase.from('users').select(ACCESS_SELECT).order('created_at', { ascending: false });
   if (error) throw databaseError('list accesses', error);
-  return (data || []).map(mapAccess);
+  const storedTokens = await tokenVault.all();
+  return (data || []).map((user) => mapAccess(user, storedTokens[user.id] || null));
 }
 
 async function createAdminAccess(input) {
   const token = generateToken();
+  const tokenHash = hashToken(token);
   const { data, error } = await supabase.rpc('create_admin_access', {
     p_organization_id: input.organizationId,
     p_name: input.name,
@@ -103,9 +108,10 @@ async function createAdminAccess(input) {
     p_phone: input.phone,
     p_role: input.role,
     p_expires_at: input.expiresAt,
-    p_token_hash: hashToken(token)
+    p_token_hash: tokenHash
   });
   if (error) throw rpcError(error);
+  await tokenVault.set(data.user_id, token);
   return { user: await getAccess(data.user_id), token };
 }
 
@@ -129,17 +135,20 @@ async function updateAdminAccess(userId, input) {
 async function runUserAction(userId, action) {
   const { error } = await supabase.rpc('change_admin_access', { p_user_id: userId, p_action: action });
   if (error) throw rpcError(error);
+  if (action === 'invalidate_token') await tokenVault.remove(userId);
   return getAccess(userId);
 }
 
 async function renewAdminAccessToken(userId, expiresAt) {
   const token = generateToken();
+  const tokenHash = hashToken(token);
   const { error } = await supabase.rpc('renew_admin_access_token', {
     p_user_id: userId,
     p_expires_at: expiresAt,
-    p_token_hash: hashToken(token)
+    p_token_hash: tokenHash
   });
   if (error) throw rpcError(error);
+  await tokenVault.set(userId, token);
   return { user: await getAccess(userId), token };
 }
 
