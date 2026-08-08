@@ -3,6 +3,7 @@ const path = require('path');
 
 const filePath = process.env.CLIENTS_FILE_PATH || path.join(process.cwd(), 'data', 'clientes.json');
 const leadsFilePath = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json');
+const customerClientsFilePath = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(path.dirname(filePath), 'customer_clients.json');
 let writeQueue = Promise.resolve();
 
 function slug(value) {
@@ -66,4 +67,20 @@ async function organizationLeads(organizationId) {
     });
 }
 
-module.exports = { ensure, organizationLeads };
+async function organizationCustomers(organizationId) {
+  const clients = await read();
+  const brokersByInstance = new Map(clients
+    .filter((client) => client.organizationId === organizationId && client.ativo !== false)
+    .map((client) => [String(client.instanceName || '').toLowerCase(), client]));
+  if (!brokersByInstance.size) return [];
+  let customers = [];
+  try { const value = JSON.parse(await fs.readFile(customerClientsFilePath, 'utf8')); customers = Array.isArray(value) ? value : []; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  return customers.filter((customer) => brokersByInstance.has(String(customer.instanceName || '').toLowerCase()))
+    .map((customer) => {
+      const broker = brokersByInstance.get(String(customer.instanceName || '').toLowerCase());
+      return { ...customer, brokerUserId: broker.accessUserId || null, brokerName: broker.nome || 'Corretor' };
+    });
+}
+
+module.exports = { ensure, organizationLeads, organizationCustomers };

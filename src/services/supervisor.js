@@ -80,4 +80,9 @@ async function listSupervisorLeads(organizationId) {
   catch (error) { throw databaseError('list operational leads', error); }
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, listSupervisorLeads };
+async function listSupervisorOperationalCustomers(organizationId) {
+  try { return await legacyBrokerAccess.organizationCustomers(organizationId); }
+  catch (error) { throw databaseError('list operational customers', error); }
+}
+
+module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, listSupervisorLeads, listSupervisorOperationalCustomers };

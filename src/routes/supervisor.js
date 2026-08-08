@@ -37,5 +37,6 @@ for (const [path, action] of [['block', 'block'], ['reactivate', 'reactivate'], 
 router.post('/api/supervisor/brokers/:userId/token/renew', async (req, res) => { if (!UUID.test(req.params.userId)) return res.status(400).json({ ok: false, error: 'Corretor inválido.' }); try { const result = await service.renewSupervisorBrokerToken(req.accessUser.organizationId, req.params.userId, req.body?.expiresAt || null); return res.status(200).json({ ok: true, broker: result.user, token: result.token }); } catch (error) { return sendError(res, error); } });
 router.get('/api/supervisor/clients', async (req, res) => { try { return res.status(200).json({ ok: true, clients: await service.listSupervisorClients(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
 router.get('/api/supervisor/leads', async (req, res) => { try { return res.status(200).json({ ok: true, leads: await service.listSupervisorLeads(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
+router.get('/api/supervisor/operational-clients', async (req, res) => { try { return res.status(200).json({ ok: true, clients: await service.listSupervisorOperationalCustomers(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
 
 module.exports = router;
