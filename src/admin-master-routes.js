@@ -11,7 +11,7 @@ const VERSION = '1.1.0-admin-master-separated-panel';
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
 const LEADS_FILE = process.env.LEADS_FILE_PATH || path.join(ROOT, 'data', 'leads.json');
-const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'customer_clients.json');
+const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(path.dirname(CLIENTS_FILE), 'customer_clients.json');
 const ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY || '';
 
 const STATUS_LABELS = {

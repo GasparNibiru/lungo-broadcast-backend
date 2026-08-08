@@ -10,7 +10,7 @@ let registered = false;
 const VERSION = '1.0.0-client-product-folders';
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
-const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'customer_clients.json');
+const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(path.dirname(CLIENTS_FILE), 'customer_clients.json');
 const MAX_PDF_BYTES = Number(process.env.CLIENT_DOC_MAX_BYTES || 6 * 1024 * 1024);
 
 function setCors(res) {

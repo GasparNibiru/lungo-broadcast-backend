@@ -13,7 +13,7 @@ const VERSION = '1.0.0-scheduled-followups';
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
 const LEADS_FILE = process.env.LEADS_FILE_PATH || path.join(ROOT, 'data', 'leads.json');
-const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'customer_clients.json');
+const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(path.dirname(CLIENTS_FILE), 'customer_clients.json');
 const INTERVAL_MS = Math.max(Number(process.env.SCHEDULED_FOLLOWUPS_INTERVAL_MS || 60000), 30000);
 const MAX_PER_TICK = Math.max(Number(process.env.SCHEDULED_FOLLOWUPS_MAX_PER_TICK || 20), 1);
 

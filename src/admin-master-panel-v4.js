@@ -12,7 +12,7 @@ const VERSION = '4.0.0-admin-master-evolution-fixed';
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
 const LEADS_FILE = process.env.LEADS_FILE_PATH || path.join(ROOT, 'data', 'leads.json');
-const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'customer_clients.json');
+const CUSTOMER_CLIENTS_FILE = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(path.dirname(CLIENTS_FILE), 'customer_clients.json');
 const ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY || process.env.ADMIN_KEY || '';
 const DEFAULT_CORRETOR_APP_URL = process.env.CORRETOR_APP_URL || process.env.FRONTEND_CORRETOR_URL || 'https://crm.lungocorretores.com.br';
 
