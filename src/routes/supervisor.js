@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireAccess } = require('../middleware/require-access');
 const service = require('../services/supervisor');
+const legacyBrokerAccess = require('../services/legacy-broker-access');
 
 const router = express.Router();
 const requireSupervisor = requireAccess('supervisor');
@@ -19,7 +20,12 @@ function brokerPayload(body, creating = false) {
   return { value };
 }
 
-router.post('/api/access/auth/verify', requireAccess(), (req, res) => res.status(200).json({ ok: true, user: req.accessUser }));
+router.post('/api/access/auth/verify', requireAccess(), async (req, res) => {
+  try {
+    const client = req.accessUser.role === 'broker' ? await legacyBrokerAccess.ensure(req.accessUser, req.accessToken) : null;
+    return res.status(200).json({ ok: true, user: req.accessUser, client: client ? { nome: client.nome, instanceName: client.instanceName } : null });
+  } catch (error) { return sendError(res, error); }
+});
 
 router.use('/api/supervisor', requireSupervisor);
 router.get('/api/supervisor/session', (req, res) => res.status(200).json({ ok: true, user: req.accessUser }));

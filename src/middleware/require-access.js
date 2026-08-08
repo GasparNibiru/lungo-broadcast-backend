@@ -37,6 +37,7 @@ function requireAccess(roles = []) {
     if (allowed.size && !allowed.has(user.role)) return res.status(403).json({ ok: false, error: 'Perfil sem permissão para esta operação.' });
 
     req.accessUser = { id: user.id, organizationId: user.organization_id, role: user.role, name: user.name, email: user.email, phone: user.phone, organization: user.organizations };
+    req.accessToken = token;
     Promise.all([
       supabase.from('access_tokens').update({ last_used_at: new Date().toISOString() }).eq('id', data.id),
       supabase.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', user.id)
