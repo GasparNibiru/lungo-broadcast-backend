@@ -2,6 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 
 const filePath = process.env.CLIENTS_FILE_PATH || path.join(process.cwd(), 'data', 'clientes.json');
+const leadsFilePath = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json');
 let writeQueue = Promise.resolve();
 
 function slug(value) {
@@ -49,4 +50,20 @@ async function ensure(user, token) {
   return result;
 }
 
-module.exports = { ensure };
+async function organizationLeads(organizationId) {
+  const clients = await read();
+  const brokersByInstance = new Map(clients
+    .filter((client) => client.organizationId === organizationId && client.ativo !== false)
+    .map((client) => [String(client.instanceName || '').toLowerCase(), client]));
+  if (!brokersByInstance.size) return [];
+  let leads = [];
+  try { const value = JSON.parse(await fs.readFile(leadsFilePath, 'utf8')); leads = Array.isArray(value) ? value : []; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  return leads.filter((lead) => brokersByInstance.has(String(lead.instanceName || '').toLowerCase()))
+    .map((lead) => {
+      const broker = brokersByInstance.get(String(lead.instanceName || '').toLowerCase());
+      return { ...lead, brokerUserId: broker.accessUserId || null, brokerName: broker.nome || 'Corretor' };
+    });
+}
+
+module.exports = { ensure, organizationLeads };

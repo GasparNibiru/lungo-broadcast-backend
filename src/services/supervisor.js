@@ -1,5 +1,6 @@
 const supabase = require('../database/supabase');
 const { createAdminAccess, updateAdminAccess, runUserAction, renewAdminAccessToken } = require('./admin-accesses');
+const legacyBrokerAccess = require('./legacy-broker-access');
 
 function databaseError(context, error) {
   console.error(`[SUPERVISOR DATABASE ERROR] ${context}`, error?.message || error);
@@ -74,4 +75,9 @@ async function listSupervisorClients(organizationId) {
   return data || [];
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients };
+async function listSupervisorLeads(organizationId) {
+  try { return await legacyBrokerAccess.organizationLeads(organizationId); }
+  catch (error) { throw databaseError('list operational leads', error); }
+}
+
+module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, listSupervisorLeads };
