@@ -19,6 +19,7 @@ const adminFinancialRouter = require('./routes/admin-financial');
 const adminSupervisorsRouter = require('./routes/admin-supervisors');
 const adminAccessesRouter = require('./routes/admin-accesses');
 const adminPaymentsRouter = require('./routes/admin-payments');
+const supervisorRouter = require('./routes/supervisor');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -34,7 +35,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.header('Vary', 'Origin');
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey, x-api-key, x-admin-key');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, apikey, x-api-key, x-admin-key, x-access-token');
   res.header('Access-Control-Allow-Credentials', 'false');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -52,6 +53,7 @@ app.use(adminFinancialRouter);
 app.use(adminSupervisorsRouter);
 app.use(adminAccessesRouter);
 app.use(adminPaymentsRouter);
+app.use(supervisorRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
