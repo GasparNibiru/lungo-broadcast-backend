@@ -22,7 +22,7 @@ function brokerPayload(body, creating = false) {
 
 router.post('/api/access/auth/verify', requireAccess(), async (req, res) => {
   try {
-    const client = req.accessUser.role === 'broker' ? await legacyBrokerAccess.ensure(req.accessUser, req.accessToken) : null;
+    const client = ['broker', 'supervisor'].includes(req.accessUser.role) ? await legacyBrokerAccess.ensure(req.accessUser, req.accessToken) : null;
     return res.status(200).json({ ok: true, user: req.accessUser, client: client ? { nome: client.nome, instanceName: client.instanceName } : null });
   } catch (error) { return sendError(res, error); }
 });
