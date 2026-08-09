@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { requireAccess } = require('../middleware/require-access');
 
 const router = express.Router();
-const FILE = process.env.RECRUITMENT_FILE_PATH || path.resolve(__dirname, '../../data/recruitment.json');
+const FILE = process.env.RECRUITMENT_FILE_PATH || (process.env.NODE_ENV === 'staging' ? '/data-staging/recruitment.json' : path.resolve(__dirname, '../../data/recruitment.json'));
 const STAGES = new Set(['novo', 'triagem', 'contato', 'entrevista', 'aprovado', 'recusado']);
 function load() { try { const data = JSON.parse(fs.readFileSync(FILE, 'utf8')); return data && typeof data === 'object' ? data : { vacancies: [], candidates: [] }; } catch { return { vacancies: [], candidates: [] }; } }
 function save(data) { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, `${JSON.stringify(data, null, 2)}\n`, 'utf8'); }

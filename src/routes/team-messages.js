@@ -6,7 +6,7 @@ const supabase = require('../database/supabase');
 const { requireAccess } = require('../middleware/require-access');
 
 const router = express.Router();
-const FILE = process.env.TEAM_MESSAGES_FILE_PATH || path.resolve(__dirname, '../../data/team-messages.json');
+const FILE = process.env.TEAM_MESSAGES_FILE_PATH || (process.env.NODE_ENV === 'staging' ? '/data-staging/team-messages.json' : path.resolve(__dirname, '../../data/team-messages.json'));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function load() { try { const data = JSON.parse(fs.readFileSync(FILE, 'utf8')); return Array.isArray(data) ? data : []; } catch { return []; } }
 function save(data) { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, `${JSON.stringify(data, null, 2)}\n`, 'utf8'); }
