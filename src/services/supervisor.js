@@ -1,6 +1,7 @@
 const supabase = require('../database/supabase');
 const { createAdminAccess, updateAdminAccess, runUserAction, renewAdminAccessToken } = require('./admin-accesses');
 const legacyBrokerAccess = require('./legacy-broker-access');
+const tokenVault = require('./access-token-vault');
 
 function databaseError(context, error) {
   console.error(`[SUPERVISOR DATABASE ERROR] ${context}`, error?.message || error);
@@ -43,11 +44,15 @@ async function listSupervisorBrokers(organizationId) {
   const { data, error } = await supabase.from('users').select('id, name, email, phone, role, status, last_login_at, created_at, access_tokens(status, expires_at, last_used_at, created_at)').eq('organization_id', organizationId).eq('role', 'broker').order('created_at', { ascending: false });
   if (error) throw databaseError('list brokers', error);
   const now = Date.now();
-  return (data || []).map((broker) => ({
-    id: broker.id, name: broker.name, email: broker.email, phone: broker.phone, status: broker.status,
-    lastLoginAt: broker.last_login_at, createdAt: broker.created_at,
-    tokenActive: (broker.access_tokens || []).some((token) => token.status === 'active' && (!token.expires_at || Date.parse(token.expires_at) > now))
-  }));
+  const storedTokens = await tokenVault.all();
+  return (data || []).map((broker) => {
+    const tokenActive = (broker.access_tokens || []).some((token) => token.status === 'active' && (!token.expires_at || Date.parse(token.expires_at) > now));
+    return {
+      id: broker.id, name: broker.name, email: broker.email, phone: broker.phone, status: broker.status,
+      lastLoginAt: broker.last_login_at, createdAt: broker.created_at, tokenActive,
+      token: tokenActive ? storedTokens[broker.id] || null : null
+    };
+  });
 }
 
 async function createSupervisorBroker(organizationId, input) {
