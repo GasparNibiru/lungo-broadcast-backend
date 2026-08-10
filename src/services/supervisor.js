@@ -88,6 +88,32 @@ async function listSupervisorClients(organizationId) {
   return data || [];
 }
 
+async function importSupervisorClients(organizationId, rows) {
+  const incoming = Array.isArray(rows) ? rows.slice(0, 1000) : [];
+  if (!incoming.length) { const error = new Error('Envie uma lista de clientes para importar.'); error.statusCode = 400; throw error; }
+  const normalized = incoming.map((row) => ({
+    organization_id: organizationId,
+    name: String(row.nome || row.name || '').trim(),
+    phone: String(row.telefone || row.whatsapp || row.phone || '').replace(/\D/g, ''),
+    email: String(row.email || '').trim() || null,
+    document_number: String(row.documento || row.cpfCnpj || '').trim() || null,
+    city: String(row.cidade || '').trim() || null,
+    status: 'active'
+  })).filter((row) => row.name && row.phone);
+  if (!normalized.length) { const error = new Error('Nenhum cliente valido foi encontrado.'); error.statusCode = 400; throw error; }
+  const { data: existing, error: listError } = await supabase.from('clients').select('id, phone').eq('organization_id', organizationId);
+  if (listError) throw databaseError('list clients for import', listError);
+  const byPhone = new Map((existing || []).map((row) => [String(row.phone || '').replace(/\D/g, ''), row.id]));
+  let created = 0; let updated = 0;
+  for (const row of normalized) {
+    const id = byPhone.get(row.phone);
+    const result = id ? await supabase.from('clients').update({ ...row, updated_at: new Date().toISOString() }).eq('id', id).eq('organization_id', organizationId) : await supabase.from('clients').insert(row).select('id').single();
+    if (result.error) throw databaseError('import client', result.error);
+    if (id) updated += 1; else { created += 1; byPhone.set(row.phone, result.data.id); }
+  }
+  return { created, updated };
+}
+
 async function listSupervisorLeads(organizationId) {
   try { return await legacyBrokerAccess.organizationLeads(organizationId); }
   catch (error) { throw databaseError('list operational leads', error); }
@@ -98,4 +124,4 @@ async function listSupervisorOperationalCustomers(organizationId) {
   catch (error) { throw databaseError('list operational customers', error); }
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, listSupervisorLeads, listSupervisorOperationalCustomers };
+module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, listSupervisorOperationalCustomers };
