@@ -595,6 +595,10 @@ async function syncRecentConversations(req, res) {
       reasons,
       evolutionStatus: result.status,
       leadCount: clientLeads.length,
+      leads: clientLeads
+        .sort((a, b) => clean(b.lastMessageAt || b.updatedAt || '').localeCompare(clean(a.lastMessageAt || a.updatedAt || '')))
+        .slice(0, limit)
+        .map(publicLead),
       sample: clientLeads
         .sort((a, b) => clean(b.updatedAt || '').localeCompare(clean(a.updatedAt || '')))
         .slice(0, 5)

@@ -329,6 +329,7 @@ async function syncRecent(req, res) {
       ok: true,
       client: publicClient(client), requestedLimit: limit, sourceType: result.sourceType, scanned: result.items.length, created, updated, skipped, reasons,
       evolutionStatus: result.status, attempts: result.attempts, leadCount: activeClientLeads.length, ignoredCount: clientLeads.length - activeClientLeads.length,
+      leads: activeClientLeads.slice().sort((a, b) => clean(b.lastMessageAt || b.updatedAt || '').localeCompare(clean(a.lastMessageAt || a.updatedAt || ''))).slice(0, limit).map(publicLead),
       sample: activeClientLeads.sort((a, b) => clean(b.updatedAt || '').localeCompare(clean(a.updatedAt || ''))).slice(0, 5).map(publicLead),
       version: VERSION
     };

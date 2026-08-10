@@ -23,6 +23,7 @@ const supervisorRouter = require('./routes/supervisor');
 const trainingsRouter = require('./routes/trainings');
 const teamMessagesRouter = require('./routes/team-messages');
 const recruitmentRouter = require('./routes/recruitment');
+const termsAcceptanceRouter = require('./routes/terms-acceptance');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -60,6 +61,7 @@ app.use(supervisorRouter);
 app.use(trainingsRouter);
 app.use(teamMessagesRouter);
 app.use(recruitmentRouter);
+app.use(termsAcceptanceRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
