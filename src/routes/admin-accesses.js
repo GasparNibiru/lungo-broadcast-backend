@@ -5,6 +5,7 @@ const {
   createAdminAccess,
   updateAdminAccess,
   runUserAction,
+  archiveAdminAccess,
   renewAdminAccessToken
 } = require('../services/admin-accesses');
 
@@ -75,6 +76,11 @@ router.patch('/api/admin/accesses/:userId', requireUserId, async (req, res) => {
   if (validation.errors) return res.status(400).json({ ok: false, error: 'Dados inválidos.', details: validation.errors });
   try { return res.status(200).json({ ok: true, user: await updateAdminAccess(req.params.userId, validation.value) }); }
   catch (error) { return sendError(res, error, 'update'); }
+});
+
+router.delete('/api/admin/accesses/:userId', requireUserId, async (req, res) => {
+  try { return res.status(200).json({ ok: true, access: await archiveAdminAccess(req.params.userId) }); }
+  catch (error) { return sendError(res, error, 'archive'); }
 });
 
 for (const [path, action] of [['block', 'block'], ['reactivate', 'reactivate'], ['token/invalidate', 'invalidate_token']]) {

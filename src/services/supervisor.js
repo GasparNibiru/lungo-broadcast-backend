@@ -1,5 +1,5 @@
 const supabase = require('../database/supabase');
-const { createAdminAccess, updateAdminAccess, runUserAction, renewAdminAccessToken } = require('./admin-accesses');
+const { createAdminAccess, updateAdminAccess, runUserAction, archiveAdminAccess, renewAdminAccessToken } = require('./admin-accesses');
 const legacyBrokerAccess = require('./legacy-broker-access');
 const tokenVault = require('./access-token-vault');
 
@@ -42,7 +42,7 @@ async function getSupervisorDashboard(organizationId) {
 
 async function listSupervisorBrokers(organizationId) {
   const [usersResult, salesResult] = await Promise.all([
-    supabase.from('users').select('id, name, email, phone, role, status, last_login_at, created_at, access_tokens(status, expires_at, last_used_at, created_at)').eq('organization_id', organizationId).eq('role', 'broker').order('created_at', { ascending: false }),
+    supabase.from('users').select('id, name, email, phone, role, status, last_login_at, created_at, access_tokens(status, expires_at, last_used_at, created_at)').eq('organization_id', organizationId).eq('role', 'broker').neq('status', 'inactive').order('created_at', { ascending: false }),
     supabase.from('sales').select('seller_user_id, amount, sale_date').eq('organization_id', organizationId)
   ]);
   if (usersResult.error || salesResult.error) throw databaseError('list brokers', usersResult.error || salesResult.error);
@@ -75,6 +75,11 @@ async function updateSupervisorBroker(organizationId, userId, input) {
 async function changeSupervisorBroker(organizationId, userId, action) {
   await organizationBroker(organizationId, userId);
   return runUserAction(userId, action);
+}
+
+async function archiveSupervisorBroker(organizationId, userId) {
+  await organizationBroker(organizationId, userId);
+  return archiveAdminAccess(userId);
 }
 
 async function renewSupervisorBrokerToken(organizationId, userId, expiresAt) {
@@ -124,4 +129,4 @@ async function listSupervisorOperationalCustomers(organizationId) {
   catch (error) { throw databaseError('list operational customers', error); }
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, listSupervisorOperationalCustomers };
+module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, listSupervisorOperationalCustomers };
