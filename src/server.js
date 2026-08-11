@@ -25,6 +25,7 @@ const teamMessagesRouter = require('./routes/team-messages');
 const recruitmentRouter = require('./routes/recruitment');
 const termsAcceptanceRouter = require('./routes/terms-acceptance');
 const calendarRouter = require('./routes/calendar');
+const leadMarketplaceRouter = require('./routes/lead-marketplace');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -64,6 +65,7 @@ app.use(teamMessagesRouter);
 app.use(recruitmentRouter);
 app.use(termsAcceptanceRouter);
 app.use(calendarRouter);
+app.use(leadMarketplaceRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
