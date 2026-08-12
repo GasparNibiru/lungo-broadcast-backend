@@ -2,6 +2,7 @@ const express = require('express');
 const requireAdmin = require('../middleware/require-admin');
 const {
   listAdminOrganizations,
+  listArchivedAdminOrganizations,
   updateAdminOrganization,
   changeAdminOrganizationSubscriptionStatus
 } = require('../services/admin-organizations');
@@ -73,6 +74,11 @@ router.get('/api/admin/organizations', requireAdmin, async (req, res) => {
     console.error('[ADMIN ORGANIZATIONS ERROR]', error.message || error);
     return res.status(500).json({ ok: false, error: 'Erro ao carregar organizações.' });
   }
+});
+
+router.get('/api/admin/organizations-archived', requireAdmin, async (req, res) => {
+  try { return res.status(200).json({ ok: true, organizations: await listArchivedAdminOrganizations() }); }
+  catch (error) { return res.status(500).json({ ok: false, error: 'Erro ao carregar organizações excluídas.' }); }
 });
 
 router.patch('/api/admin/organizations/:organizationId', requireAdmin, requireOrganizationId, async (req, res) => {
