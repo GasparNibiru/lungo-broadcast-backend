@@ -23,16 +23,18 @@ async function organizationBroker(organizationId, userId) {
 
 async function getSupervisorDashboard(organizationId) {
   const count = (table, configure = (query) => query) => configure(supabase.from(table).select('id', { count: 'exact', head: true }).eq('organization_id', organizationId));
-  const [brokers, clients, leads, sales, subscription] = await Promise.all([
+  const [brokers, activeBrokerUsers, clients, leads, sales, subscription] = await Promise.all([
     count('users', (query) => query.eq('role', 'broker').eq('status', 'active')),
+    supabase.from('users').select('id').eq('organization_id', organizationId).eq('role', 'broker').eq('status', 'active'),
     count('clients', (query) => query.eq('status', 'active')),
     count('leads'),
-    supabase.from('sales').select('amount, sale_date').eq('organization_id', organizationId),
+    supabase.from('sales').select('seller_user_id, amount, sale_date').eq('organization_id', organizationId),
     supabase.from('subscriptions').select('status, total_price, extra_accesses, next_due_date, plans(code, name, included_supervisors, included_brokers)').eq('organization_id', organizationId).eq('status', 'active').order('started_at', { ascending: false }).limit(1).maybeSingle()
   ]);
-  for (const result of [brokers, clients, leads, sales, subscription]) if (result.error) throw databaseError('dashboard', result.error);
+  for (const result of [brokers, activeBrokerUsers, clients, leads, sales, subscription]) if (result.error) throw databaseError('dashboard', result.error);
   const month = new Date().toISOString().slice(0, 7);
-  const monthSales = (sales.data || []).filter((sale) => String(sale.sale_date).startsWith(month));
+  const activeBrokerIds = new Set((activeBrokerUsers.data || []).map((user) => user.id));
+  const monthSales = (sales.data || []).filter((sale) => activeBrokerIds.has(sale.seller_user_id) && String(sale.sale_date).startsWith(month));
   return {
     brokers: brokers.count || 0, clients: clients.count || 0, leads: leads.count || 0,
     sales: monthSales.length, revenue: monthSales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0),
@@ -79,7 +81,9 @@ async function changeSupervisorBroker(organizationId, userId, action) {
 
 async function archiveSupervisorBroker(organizationId, userId) {
   await organizationBroker(organizationId, userId);
-  return archiveAdminAccess(userId);
+  const archived = await archiveAdminAccess(userId);
+  await legacyBrokerAccess.deactivate(userId);
+  return archived;
 }
 
 async function renewSupervisorBrokerToken(organizationId, userId, expiresAt) {
@@ -120,12 +124,22 @@ async function importSupervisorClients(organizationId, rows) {
 }
 
 async function listSupervisorLeads(organizationId) {
-  try { return await legacyBrokerAccess.organizationLeads(organizationId); }
+  try {
+    const { data, error } = await supabase.from('users').select('id').eq('organization_id', organizationId).eq('role', 'broker').eq('status', 'active');
+    if (error) throw error;
+    const activeBrokerIds = new Set((data || []).map((user) => user.id));
+    return (await legacyBrokerAccess.organizationLeads(organizationId)).filter((lead) => activeBrokerIds.has(lead.brokerUserId));
+  }
   catch (error) { throw databaseError('list operational leads', error); }
 }
 
 async function listSupervisorOperationalCustomers(organizationId) {
-  try { return await legacyBrokerAccess.organizationCustomers(organizationId); }
+  try {
+    const { data, error } = await supabase.from('users').select('id').eq('organization_id', organizationId).eq('role', 'broker').eq('status', 'active');
+    if (error) throw error;
+    const activeBrokerIds = new Set((data || []).map((user) => user.id));
+    return (await legacyBrokerAccess.organizationCustomers(organizationId)).filter((customer) => activeBrokerIds.has(customer.brokerUserId));
+  }
   catch (error) { throw databaseError('list operational customers', error); }
 }
 

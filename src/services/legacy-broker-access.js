@@ -51,6 +51,16 @@ async function ensure(user, token) {
   return result;
 }
 
+async function deactivate(accessUserId) {
+  if (!accessUserId) return;
+  await mutate((clients) => {
+    const client = clients.find((item) => item.accessUserId === accessUserId);
+    if (!client) return;
+    client.ativo = false;
+    client.updatedAt = new Date().toISOString();
+  });
+}
+
 async function organizationLeads(organizationId) {
   const clients = await read();
   const brokersByInstance = new Map(clients
@@ -83,4 +93,4 @@ async function organizationCustomers(organizationId) {
     });
 }
 
-module.exports = { ensure, organizationLeads, organizationCustomers };
+module.exports = { ensure, deactivate, organizationLeads, organizationCustomers };
