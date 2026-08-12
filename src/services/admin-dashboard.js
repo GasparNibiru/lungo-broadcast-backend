@@ -55,6 +55,12 @@ async function countRows(table, status) {
   return count || 0;
 }
 
+async function countVisibleOrganizations() {
+  const { count, error } = await supabase.from('organizations').select('id', { count: 'exact', head: true }).neq('status', 'inactive');
+  if (error) throwDatabaseError('count visible organizations', error);
+  return count || 0;
+}
+
 async function loadActiveSubscriptions() {
   const subscriptions = [];
 
@@ -88,6 +94,7 @@ async function loadRecentOrganizations() {
         plans (name)
       )
     `)
+    .neq('status', 'inactive')
     .order('created_at', { ascending: false })
     .limit(RECENT_ORGANIZATIONS_LIMIT);
 
@@ -104,7 +111,7 @@ async function getAdminDashboard() {
     activeRows,
     recentOrganizations
   ] = await Promise.all([
-    countRows('organizations'),
+    countVisibleOrganizations(),
     countRows('subscriptions', 'active'),
     countRows('subscriptions', 'suspended'),
     countRows('subscriptions', 'cancelled'),

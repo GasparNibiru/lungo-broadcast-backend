@@ -223,7 +223,9 @@ function normalizePhone(value) {
 
   if (digits.startsWith('00')) digits = digits.slice(2);
 
-  if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) {
+  // Brazilian numbers with 10/11 digits are domestic (DDD + local number).
+  // A domestic number whose DDD is 55 must not be mistaken for country code +55.
+  if (digits.length === 10 || digits.length === 11) {
     digits = `55${digits}`;
   }
 

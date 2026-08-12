@@ -103,6 +103,7 @@ async function listAdminOrganizations() {
   const { data, error } = await supabase
     .from('organizations')
     .select(ORGANIZATIONS_SELECT)
+    .neq('status', 'inactive')
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -114,6 +115,17 @@ async function listAdminOrganizations() {
     throw new Error('Failed to load organizations.');
   }
 
+  return (data || []).map(mapOrganization);
+}
+
+async function listArchivedAdminOrganizations() {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select(ORGANIZATIONS_SELECT)
+    .eq('status', 'inactive')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw new Error('Failed to load archived organizations.');
   return (data || []).map(mapOrganization);
 }
 
@@ -197,6 +209,7 @@ async function changeAdminOrganizationSubscriptionStatus(organizationId, action)
 module.exports = {
   AdminOrganizationError,
   listAdminOrganizations,
+  listArchivedAdminOrganizations,
   updateAdminOrganization,
   changeAdminOrganizationSubscriptionStatus
 };

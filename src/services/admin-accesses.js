@@ -92,7 +92,7 @@ async function getAccess(userId) {
 }
 
 async function listAdminAccesses() {
-  const { data, error } = await supabase.from('users').select(ACCESS_SELECT).order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('users').select(ACCESS_SELECT).neq('status', 'inactive').order('created_at', { ascending: false });
   if (error) throw databaseError('list accesses', error);
   const storedTokens = await tokenVault.all();
   return (data || []).map((user) => mapAccess(user, storedTokens[user.id] || null));
@@ -139,6 +139,16 @@ async function runUserAction(userId, action) {
   return getAccess(userId);
 }
 
+async function archiveAdminAccess(userId) {
+  const { data, error } = await supabase.from('users').update({ status: 'inactive' }).eq('id', userId).select('id').maybeSingle();
+  if (error) throw databaseError('archive access', error);
+  if (!data) throw new AdminAccessError('Usuário não encontrado.', 404);
+  const { error: tokenError } = await supabase.from('access_tokens').update({ status: 'revoked', revoked_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'active');
+  if (tokenError) throw databaseError('archive access tokens', tokenError);
+  await tokenVault.remove(userId);
+  return { id: userId, archived: true };
+}
+
 async function renewAdminAccessToken(userId, expiresAt) {
   const token = generateToken();
   const tokenHash = hashToken(token);
@@ -158,5 +168,6 @@ module.exports = {
   createAdminAccess,
   updateAdminAccess,
   runUserAction,
+  archiveAdminAccess,
   renewAdminAccessToken
 };
