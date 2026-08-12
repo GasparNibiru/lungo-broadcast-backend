@@ -103,6 +103,7 @@ async function listAdminOrganizations() {
   const { data, error } = await supabase
     .from('organizations')
     .select(ORGANIZATIONS_SELECT)
+    .neq('status', 'inactive')
     .order('created_at', { ascending: false })
     .limit(100);
 
