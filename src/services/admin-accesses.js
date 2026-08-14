@@ -164,6 +164,8 @@ async function renewAdminAccessToken(userId, expiresAt) {
 
 module.exports = {
   AdminAccessError,
+  generateToken,
+  hashToken,
   listAdminAccesses,
   createAdminAccess,
   updateAdminAccess,

@@ -28,9 +28,18 @@ function validate(body) {
   if (!Number.isInteger(body.extraAccesses) || body.extraAccesses < 0) {
     errors.push('extraAccesses deve ser um número inteiro maior ou igual a zero.');
   }
+  if (body.planCode === 'free' && body.extraAccesses !== 0) {
+    errors.push('O Plano Free não aceita acessos extras.');
+  }
   if (typeof body.legacy !== 'boolean') errors.push('legacy deve ser booleano.');
   if (body.documentNumber != null && typeof body.documentNumber !== 'string') {
     errors.push('documentNumber deve ser texto ou null.');
+  }
+  if (body.generateAccess != null && typeof body.generateAccess !== 'boolean') {
+    errors.push('generateAccess deve ser booleano.');
+  }
+  if (body.generateAccess === true && !['supervisor', 'broker'].includes(body.accessRole)) {
+    errors.push('accessRole deve ser supervisor ou broker quando generateAccess for true.');
   }
   if (body.organizationType && !['individual', 'brokerage'].includes(body.organizationType)) {
     errors.push('organizationType deve ser individual ou brokerage.');
@@ -69,7 +78,9 @@ function validate(body) {
       firstPaymentDate: body.firstPaymentDate,
       firstPaymentStatus: body.firstPaymentStatus,
       dueMode: body.dueMode,
-      fixedDueDay: body.dueMode === 'fixed_day' ? body.fixedDueDay : null
+      fixedDueDay: body.dueMode === 'fixed_day' ? body.fixedDueDay : null,
+      generateAccess: body.generateAccess === true,
+      accessRole: body.generateAccess === true ? body.accessRole : null
     }
   };
 }
@@ -86,7 +97,8 @@ router.post('/api/admin/subscriptions', requireAdmin, async (req, res) => {
       ok: true,
       organization: result.organization,
       subscription: result.subscription,
-      payment: result.payment
+      payment: result.payment,
+      ...(result.access ? { access: result.access, token: result.token } : {})
     });
   } catch (error) {
     const statusCode = [400, 409].includes(error.statusCode) ? error.statusCode : 500;
