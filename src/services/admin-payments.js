@@ -102,19 +102,35 @@ function rpcError(error) {
 
 async function updateAdminPayment(paymentId, input) {
   const has = (field) => Object.prototype.hasOwnProperty.call(input, field);
-  const { error } = await supabase.rpc('update_admin_payment', {
-    p_payment_id: paymentId,
-    p_due_date: input.dueDate ?? null,
-    p_has_due_date: has('dueDate'),
-    p_expected_amount: input.expectedAmount ?? null,
-    p_has_expected_amount: has('expectedAmount'),
-    p_payment_method: input.paymentMethod ?? null,
-    p_has_payment_method: has('paymentMethod'),
-    p_notes: input.notes ?? null,
-    p_has_notes: has('notes')
-  });
-
-  if (error) rpcError(error);
+  const rpcFields = ['dueDate', 'expectedAmount', 'paymentMethod', 'notes'];
+  if (rpcFields.some(has)) {
+    const { error } = await supabase.rpc('update_admin_payment', {
+      p_payment_id: paymentId,
+      p_due_date: input.dueDate ?? null,
+      p_has_due_date: has('dueDate'),
+      p_expected_amount: input.expectedAmount ?? null,
+      p_has_expected_amount: has('expectedAmount'),
+      p_payment_method: input.paymentMethod ?? null,
+      p_has_payment_method: has('paymentMethod'),
+      p_notes: input.notes ?? null,
+      p_has_notes: has('notes')
+    });
+    if (error) rpcError(error);
+  }
+  if (has('paidAt')) {
+    const current = await getAdminPayment(paymentId);
+    if (current.status !== 'paid') throw new AdminPaymentError('A data de recebimento só pode ser alterada em pagamentos confirmados.', 409);
+    const { error } = await supabase.rpc('confirm_admin_payment', {
+      p_payment_id: paymentId,
+      p_paid_amount: current.paid_amount,
+      p_paid_at: input.paidAt,
+      p_payment_method: current.payment_method,
+      p_has_payment_method: true,
+      p_notes: current.notes,
+      p_has_notes: true
+    });
+    if (error) rpcError(error);
+  }
   return getAdminPayment(paymentId);
 }
 
