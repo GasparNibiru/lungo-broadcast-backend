@@ -34,6 +34,21 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
+function archivedEmail(userId) {
+  return `archived-${userId}@deleted.lungo.invalid`;
+}
+
+async function releaseArchivedEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return false;
+  const { data, error } = await supabase.from('users').select('id').eq('email', normalized).eq('status', 'inactive').maybeSingle();
+  if (error) throw databaseError('find archived email', error);
+  if (!data) return false;
+  const { error: updateError } = await supabase.from('users').update({ email: archivedEmail(data.id) }).eq('id', data.id).eq('status', 'inactive');
+  if (updateError) throw databaseError('release archived email', updateError);
+  return true;
+}
+
 function currentToken(tokens) {
   const now = Date.now();
   return [...(tokens || [])]
@@ -100,6 +115,7 @@ async function listAdminAccesses() {
 }
 
 async function createAdminAccess(input) {
+  await releaseArchivedEmail(input.email);
   const token = generateToken();
   const tokenHash = hashToken(token);
   const { data, error } = await supabase.rpc('create_admin_access', {
@@ -141,7 +157,7 @@ async function runUserAction(userId, action) {
 }
 
 async function archiveAdminAccess(userId) {
-  const { data, error } = await supabase.from('users').update({ status: 'inactive' }).eq('id', userId).select('id').maybeSingle();
+  const { data, error } = await supabase.from('users').update({ status: 'inactive', email: archivedEmail(userId) }).eq('id', userId).select('id').maybeSingle();
   if (error) throw databaseError('archive access', error);
   if (!data) throw new AdminAccessError('Usuário não encontrado.', 404);
   const { error: tokenError } = await supabase.from('access_tokens').update({ status: 'revoked', revoked_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'active');
@@ -187,6 +203,7 @@ module.exports = {
   AdminAccessError,
   generateToken,
   hashToken,
+  releaseArchivedEmail,
   listAdminAccesses,
   createAdminAccess,
   updateAdminAccess,

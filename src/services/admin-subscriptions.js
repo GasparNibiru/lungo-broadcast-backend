@@ -1,6 +1,6 @@
 const supabase = require('../database/supabase');
 const tokenVault = require('./access-token-vault');
-const { generateToken, hashToken } = require('./admin-accesses');
+const { generateToken, hashToken, releaseArchivedEmail } = require('./admin-accesses');
 const { sendAccessEmail } = require('./access-email');
 
 const DUPLICATE_CODE = '23505';
@@ -15,6 +15,7 @@ class AdminSubscriptionError extends Error {
 }
 
 async function createAdminSubscription(input) {
+  if (input.generateAccess) await releaseArchivedEmail(input.email);
   const token = input.generateAccess ? generateToken() : null;
   const rpcName = input.generateAccess ? 'create_admin_subscription_with_access' : 'create_admin_subscription';
   const parameters = {
