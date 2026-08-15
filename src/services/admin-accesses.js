@@ -164,27 +164,19 @@ async function renewAdminAccessToken(userId, expiresAt) {
 }
 
 async function resendAdminAccessEmail(userId) {
-  let access = await getAccess(userId);
+  const access = await getAccess(userId);
   if (access.status !== 'active') throw new AdminAccessError('O acesso precisa estar ativo para enviar o e-mail.', 409);
   if (!access.active_token) throw new AdminAccessError('Este usuário não possui um token ativo.', 409);
-  if (!access.email) throw new AdminAccessError('Cadastre um e-mail para este usuário antes do envio.', 409);
-  let token = await tokenVault.get(userId);
-  let tokenRenewed = false;
-  if (!token) {
-    const renewed = await renewAdminAccessToken(userId, access.token_expires_at);
-    access = renewed.user;
-    token = renewed.token;
-    tokenRenewed = true;
-  }
+  const token = await tokenVault.get(userId);
+  if (!token) throw new AdminAccessError('O token não está disponível para reenvio. Renove o token primeiro.', 409);
   try {
-    const delivery = await sendAccessEmail({
+    return await sendAccessEmail({
       email: access.email,
       name: access.name,
       organizationName: access.organization_name || 'Lungo Corretores',
       planName: access.role === 'supervisor' ? 'Supervisor' : access.role === 'broker' ? 'Corretor' : 'Admin Master',
       token
     });
-    return { ...delivery, tokenRenewed };
   } catch (error) {
     console.error('[ADMIN ACCESS EMAIL RESEND ERROR]', error.message || error);
     throw new AdminAccessError('Não foi possível enviar o e-mail pelo Zoho.', 502);
