@@ -6,7 +6,8 @@ const {
   updateAdminAccess,
   runUserAction,
   archiveAdminAccess,
-  renewAdminAccessToken
+  renewAdminAccessToken,
+  resendAdminAccessEmail
 } = require('../services/admin-accesses');
 
 const router = express.Router();
@@ -50,7 +51,7 @@ function requireUserId(req, res, next) {
 }
 
 function sendError(res, error, context) {
-  const status = [400, 404, 409].includes(error.statusCode) ? error.statusCode : 500;
+  const status = [400, 404, 409, 502].includes(error.statusCode) ? error.statusCode : 500;
   if (status === 500) console.error(`[ADMIN ACCESSES ERROR] ${context}`, error.message || error);
   return res.status(status).json({ ok: false, error: status === 500 ? 'Erro interno no servidor.' : error.message });
 }
@@ -99,6 +100,12 @@ router.post('/api/admin/accesses/:userId/token/renew', requireUserId, async (req
     const result = await renewAdminAccessToken(req.params.userId, expiresAt);
     return res.status(200).json({ ok: true, user: result.user, token: result.token });
   } catch (error) { return sendError(res, error, 'renew token'); }
+});
+
+router.post('/api/admin/accesses/:userId/email/send', requireUserId, async (req, res) => {
+  if (Object.keys(req.body || {}).length) return res.status(400).json({ ok: false, error: 'Esta operação não recebe parâmetros.' });
+  try { return res.status(200).json({ ok: true, emailDelivery: await resendAdminAccessEmail(req.params.userId) }); }
+  catch (error) { return sendError(res, error, 'resend access email'); }
 });
 
 module.exports = router;

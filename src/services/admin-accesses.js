@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const supabase = require('../database/supabase');
 const tokenVault = require('./access-token-vault');
+const { sendAccessEmail } = require('./access-email');
 
 const ACCESS_SELECT = `
   id,
@@ -162,6 +163,26 @@ async function renewAdminAccessToken(userId, expiresAt) {
   return { user: await getAccess(userId), token };
 }
 
+async function resendAdminAccessEmail(userId) {
+  const access = await getAccess(userId);
+  if (access.status !== 'active') throw new AdminAccessError('O acesso precisa estar ativo para enviar o e-mail.', 409);
+  if (!access.active_token) throw new AdminAccessError('Este usuário não possui um token ativo.', 409);
+  const token = await tokenVault.get(userId);
+  if (!token) throw new AdminAccessError('O token não está disponível para reenvio. Renove o token primeiro.', 409);
+  try {
+    return await sendAccessEmail({
+      email: access.email,
+      name: access.name,
+      organizationName: access.organization_name || 'Lungo Corretores',
+      planName: access.role === 'supervisor' ? 'Supervisor' : access.role === 'broker' ? 'Corretor' : 'Admin Master',
+      token
+    });
+  } catch (error) {
+    console.error('[ADMIN ACCESS EMAIL RESEND ERROR]', error.message || error);
+    throw new AdminAccessError('Não foi possível enviar o e-mail pelo Zoho.', 502);
+  }
+}
+
 module.exports = {
   AdminAccessError,
   generateToken,
@@ -171,5 +192,6 @@ module.exports = {
   updateAdminAccess,
   runUserAction,
   archiveAdminAccess,
-  renewAdminAccessToken
+  renewAdminAccessToken,
+  resendAdminAccessEmail
 };
