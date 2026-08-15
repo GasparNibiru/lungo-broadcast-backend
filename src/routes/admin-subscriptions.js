@@ -98,7 +98,7 @@ router.post('/api/admin/subscriptions', requireAdmin, async (req, res) => {
       organization: result.organization,
       subscription: result.subscription,
       payment: result.payment,
-      ...(result.access ? { access: result.access, token: result.token } : {})
+      ...(result.access ? { access: result.access, token: result.token, emailDelivery: result.emailDelivery } : {})
     });
   } catch (error) {
     const statusCode = [400, 409].includes(error.statusCode) ? error.statusCode : 500;
