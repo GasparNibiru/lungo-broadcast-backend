@@ -168,12 +168,14 @@ async function assignSupervisorLead(organizationId, leadId, brokerUserId) {
   return legacyBrokerAccess.assignOrganizationLead(organizationId, leadId, broker.id);
 }
 
-async function listSupervisorOperationalCustomers(organizationId) {
+async function listSupervisorOperationalCustomers(organizationId, supervisorUserId) {
   try {
-    const { data, error } = await supabase.from('users').select('id').eq('organization_id', organizationId).eq('role', 'broker').eq('status', 'active');
+    const { data, error } = await supabase.from('users').select('id, role').eq('organization_id', organizationId).in('role', ['broker', 'supervisor']).eq('status', 'active');
     if (error) throw error;
-    const activeBrokerIds = new Set((data || []).map((user) => user.id));
-    return (await legacyBrokerAccess.organizationCustomers(organizationId)).filter((customer) => activeBrokerIds.has(customer.brokerUserId));
+    const allowedOwners = new Map((data || []).filter((user) => user.role === 'broker' || user.id === supervisorUserId).map((user) => [user.id, user.role]));
+    return (await legacyBrokerAccess.organizationCustomers(organizationId))
+      .filter((customer) => allowedOwners.has(customer.brokerUserId))
+      .map((customer) => ({ ...customer, ownerRole: allowedOwners.get(customer.brokerUserId) }));
   }
   catch (error) { throw databaseError('list operational customers', error); }
 }

@@ -169,6 +169,8 @@ function normalizeSale(item = {}) {
     valor: clean(item.valor || item.valorFechado || item.valorVenda),
     dataVenda: dateOnly(item.dataVenda || item.data || item.createdAt) || new Date().toISOString().slice(0, 10),
     observacao: clean(item.observacao),
+    responsavelVendaTipo: clean(item.responsavelVendaTipo || item.saleOwnerType || 'broker'),
+    responsavelVendaNome: clean(item.responsavelVendaNome || item.saleOwnerName),
     documentacaoPdf: currentDoc,
     createdAt: item.createdAt || new Date().toISOString()
   };
@@ -191,6 +193,7 @@ function publicCustomer(item) {
     nome: item.nome || '', telefone: item.telefone || '', email: item.email || '',
     documento: item.documento || item.cpfCnpj || '', cpfCnpj: item.cpfCnpj || item.documento || '', cidade: item.cidade || '',
     produto: item.produto || '', qtdVidas: item.qtdVidas || '', valorFechado: item.valorFechado || '',
+    responsavelVendaTipo: item.responsavelVendaTipo || 'broker', responsavelVendaNome: item.responsavelVendaNome || '',
     status, statusBase: normalizeStatus(item.status || 'ativo'), statusLabel: STATUS_LABELS[status] || status,
     dataContratacao: item.dataContratacao || '', dataRenovacao: item.dataRenovacao || (renewal ? renewal.toISOString().slice(0, 10) : ''),
     diasParaRenovar: renewal ? daysBetween(todayZero(), renewal) : null,
@@ -262,6 +265,8 @@ function buildCustomer(body, client, current = {}) {
     dataContratacao: dateOnly(body.dataContratacao !== undefined ? body.dataContratacao : current.dataContratacao),
     dataRenovacao: dateOnly(body.dataRenovacao !== undefined ? body.dataRenovacao : current.dataRenovacao),
     observacao: clean(body.observacao !== undefined ? body.observacao : current.observacao),
+    responsavelVendaTipo: clean(body.responsavelVendaTipo !== undefined ? body.responsavelVendaTipo : current.responsavelVendaTipo) || 'broker',
+    responsavelVendaNome: clean(body.responsavelVendaNome !== undefined ? body.responsavelVendaNome : current.responsavelVendaNome),
     posVenda: body.posVenda !== undefined ? body.posVenda : (current.posVenda || null),
     documentacaoPdf: docInput ? normalizeDocument(docInput) : (current.documentacaoPdf || null),
     vendasBase: incomingSales,

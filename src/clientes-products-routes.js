@@ -109,6 +109,8 @@ function normalizeSaleProduct(body = {}, current = {}) {
     valor: money(body.valor !== undefined ? body.valor : (body.valorFechado !== undefined ? body.valorFechado : current.valor)),
     dataVenda: dateOnly(body.dataVenda || body.data || current.dataVenda || current.createdAt) || new Date().toISOString().slice(0, 10),
     observacao: clean(body.observacao !== undefined ? body.observacao : current.observacao),
+    responsavelVendaTipo: clean(body.responsavelVendaTipo !== undefined ? body.responsavelVendaTipo : current.responsavelVendaTipo) || 'broker',
+    responsavelVendaNome: clean(body.responsavelVendaNome !== undefined ? body.responsavelVendaNome : current.responsavelVendaNome),
     documentosPdf: safeDocumentsFrom(current),
     createdAt: current.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -125,6 +127,8 @@ function publicProduct(customer, product) {
     valor: isMain ? (customer.valorFechado || '') : (raw.valor || raw.valorFechado || ''),
     data: isMain ? (customer.dataContratacao || '') : (raw.dataVenda || raw.data || ''),
     observacao: isMain ? (customer.observacao || '') : (raw.observacao || ''),
+    responsavelVendaTipo: isMain ? (customer.responsavelVendaTipo || 'broker') : (raw.responsavelVendaTipo || 'broker'),
+    responsavelVendaNome: isMain ? (customer.responsavelVendaNome || '') : (raw.responsavelVendaNome || ''),
     documentos: safeDocumentsFrom(raw).map(publicDocument)
   };
 }
