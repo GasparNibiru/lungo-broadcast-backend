@@ -1,5 +1,5 @@
 const supabase = require('../database/supabase');
-const { createAdminAccess, updateAdminAccess, runUserAction, archiveAdminAccess, renewAdminAccessToken } = require('./admin-accesses');
+const { createAdminAccess, updateAdminAccess, runUserAction, archiveAdminAccess, renewAdminAccessToken, resendAdminAccessEmail } = require('./admin-accesses');
 const legacyBrokerAccess = require('./legacy-broker-access');
 const tokenVault = require('./access-token-vault');
 
@@ -66,7 +66,19 @@ async function listSupervisorBrokers(organizationId) {
 }
 
 async function createSupervisorBroker(organizationId, input) {
-  return createAdminAccess({ ...input, organizationId, role: 'broker' });
+  const result = await createAdminAccess({ ...input, organizationId, role: 'broker' });
+  try {
+    return { ...result, emailDelivery: await resendAdminAccessEmail(result.user.user_id) };
+  } catch (error) {
+    // The access is already committed. An email failure must not create a duplicate on retry.
+    console.error('[SUPERVISOR BROKER ACCESS EMAIL ERROR]', error.message || error);
+    return { ...result, emailDelivery: { sent: false, recipient: input.email } };
+  }
+}
+
+async function resendSupervisorBrokerEmail(organizationId, userId) {
+  await organizationBroker(organizationId, userId);
+  return resendAdminAccessEmail(userId);
 }
 
 async function updateSupervisorBroker(organizationId, userId, input) {
@@ -143,4 +155,4 @@ async function listSupervisorOperationalCustomers(organizationId) {
   catch (error) { throw databaseError('list operational customers', error); }
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, listSupervisorOperationalCustomers };
+module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, listSupervisorOperationalCustomers };
