@@ -5,6 +5,7 @@ const filePath = process.env.CLIENTS_FILE_PATH || path.join(process.cwd(), 'data
 const leadsFilePath = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json');
 const customerClientsFilePath = process.env.CUSTOMER_CLIENTS_FILE_PATH || path.join(path.dirname(filePath), 'customer_clients.json');
 let writeQueue = Promise.resolve();
+let leadWriteQueue = Promise.resolve();
 
 function slug(value) {
   return String(value || 'corretor').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -77,6 +78,48 @@ async function organizationLeads(organizationId) {
     });
 }
 
+async function assignOrganizationLead(organizationId, leadId, brokerUserId) {
+  let assignedLead;
+  leadWriteQueue = leadWriteQueue.catch(() => {}).then(async () => {
+    const clients = await read();
+    const organizationClients = clients.filter((client) => client.organizationId === organizationId && client.ativo !== false);
+    const organizationInstances = new Set(organizationClients.map((client) => String(client.instanceName || '').toLowerCase()).filter(Boolean));
+    const target = organizationClients.find((client) => client.accessUserId === brokerUserId);
+    if (!target?.instanceName) {
+      const error = new Error('O corretor ainda não possui uma instância de acesso válida.');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    let leads = [];
+    try { const value = JSON.parse(await fs.readFile(leadsFilePath, 'utf8')); leads = Array.isArray(value) ? value : []; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const index = leads.findIndex((lead) => String(lead.id) === String(leadId)
+      && organizationInstances.has(String(lead.instanceName || '').toLowerCase()));
+    if (index < 0) {
+      const error = new Error('Lead não encontrado nesta equipe.');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    assignedLead = {
+      ...leads[index],
+      instanceName: target.instanceName,
+      assignedBrokerUserId: brokerUserId,
+      assignedBrokerName: target.nome || 'Corretor',
+      assignedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    leads[index] = assignedLead;
+    await fs.mkdir(path.dirname(leadsFilePath), { recursive: true });
+    const temporary = `${leadsFilePath}.assign.tmp`;
+    await fs.writeFile(temporary, `${JSON.stringify(leads, null, 2)}\n`, 'utf8');
+    await fs.rename(temporary, leadsFilePath);
+  });
+  await leadWriteQueue;
+  return assignedLead;
+}
+
 async function organizationCustomers(organizationId) {
   const clients = await read();
   const brokersByInstance = new Map(clients
@@ -93,4 +136,4 @@ async function organizationCustomers(organizationId) {
     });
 }
 
-module.exports = { ensure, deactivate, organizationLeads, organizationCustomers };
+module.exports = { ensure, deactivate, organizationLeads, assignOrganizationLead, organizationCustomers };

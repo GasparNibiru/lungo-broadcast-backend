@@ -14,7 +14,7 @@ let extraRoutesRegistered = false;
 const ROOT = path.resolve(__dirname, '..');
 const CLIENTS_FILE = process.env.CLIENTS_FILE_PATH || path.join(ROOT, 'data', 'clientes.json');
 const LEADS_FILE = process.env.LEADS_FILE_PATH || path.join(ROOT, 'data', 'leads.json');
-const VERSION = '1.6.1';
+const VERSION = '1.6.2';
 
 const CRM_STATUS_LABELS = {
   novo_lead: 'Novo lead',
