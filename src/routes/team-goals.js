@@ -6,7 +6,10 @@ const { requireAccess } = require('../middleware/require-access');
 const legacyBrokerAccess = require('../services/legacy-broker-access');
 
 const router = express.Router();
-const FILE = process.env.TEAM_GOALS_FILE_PATH || (process.env.NODE_ENV === 'staging' ? '/data-staging/team-goals.json' : path.resolve(__dirname, '../../data/team-goals.json'));
+const FILE = process.env.TEAM_GOALS_FILE_PATH
+  || (process.env.NODE_ENV === 'staging' ? '/data-staging/team-goals.json'
+    : process.env.NODE_ENV === 'production' ? '/data/team-goals.json'
+      : path.resolve(__dirname, '../../data/team-goals.json'));
 function load() { try { const data = JSON.parse(fs.readFileSync(FILE, 'utf8')); return data && typeof data === 'object' ? data : {}; } catch { return {}; } }
 function save(data) { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, `${JSON.stringify(data, null, 2)}\n`, 'utf8'); }
 function monthOf(value) { const raw = String(value || ''); return raw.length >= 7 ? raw.slice(0, 7) : ''; }

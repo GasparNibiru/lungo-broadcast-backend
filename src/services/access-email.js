@@ -67,7 +67,10 @@ function emailHtml({ name, organizationName, planName, token, accessUrl }) {
 async function sendAccessEmail({ email, name, organizationName, planName, token }) {
   const fromEmail = required('ZOHO_FROM_EMAIL');
   required('ZOHO_FROM_NAME');
-  const accessUrl = String(process.env.LUNGO_ACCESS_URL || 'https://staging-crm.lungocorretores.com.br/').trim();
+  const defaultAccessUrl = process.env.NODE_ENV === 'staging'
+    ? 'https://staging-crm.lungocorretores.com.br/'
+    : 'https://crm.lungocorretores.com.br/';
+  const accessUrl = String(process.env.LUNGO_ACCESS_URL || defaultAccessUrl).trim();
   const payload = { fromAddress: fromEmail, toAddress: email, subject: 'Seu acesso à plataforma Lungo Corretores', content: emailHtml({ name, organizationName, planName, token, accessUrl }), mailFormat: 'html', encoding: 'UTF-8' };
   let accessToken = await getAccessToken(), accountId = await getAccountId(accessToken), data;
   const send = () => zohoRequest(`https://mail.zoho.com/api/accounts/${encodeURIComponent(accountId)}/messages`, {
