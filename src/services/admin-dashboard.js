@@ -102,6 +102,30 @@ async function loadRecentOrganizations() {
   return (data || []).map(mapRecentOrganization);
 }
 
+async function loadSalesTimeline(now = new Date()) {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 6, now.getUTCDate()));
+  const rows = [];
+
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('id, started_at, total_price')
+      .gte('started_at', start.toISOString())
+      .order('started_at', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) throwDatabaseError('load sales timeline', error);
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+
+  return rows.map((subscription) => ({
+    id: subscription.id,
+    date: subscription.started_at,
+    value: Number(subscription.total_price || 0)
+  }));
+}
+
 async function getAdminDashboard() {
   const [
     organizations,
@@ -109,14 +133,16 @@ async function getAdminDashboard() {
     suspendedSubscriptions,
     cancelledSubscriptions,
     activeRows,
-    recentOrganizations
+    recentOrganizations,
+    salesTimeline
   ] = await Promise.all([
     countVisibleOrganizations(),
     countRows('subscriptions', 'active'),
     countRows('subscriptions', 'suspended'),
     countRows('subscriptions', 'cancelled'),
     loadActiveSubscriptions(),
-    loadRecentOrganizations()
+    loadRecentOrganizations(),
+    loadSalesTimeline()
   ]);
 
   const { start, end } = getNextSevenDaysRange();
@@ -137,12 +163,14 @@ async function getAdminDashboard() {
       monthlyRevenue,
       expiringNext7Days
     },
-    recentOrganizations
+    recentOrganizations,
+    salesTimeline
   };
 }
 
 module.exports = {
   getAdminDashboard,
   getNextSevenDaysRange,
-  mapRecentOrganization
+  mapRecentOrganization,
+  loadSalesTimeline
 };

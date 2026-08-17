@@ -1,5 +1,5 @@
 const supabase = require('../database/supabase');
-const { createAdminAccess, updateAdminAccess, runUserAction, archiveAdminAccess, renewAdminAccessToken } = require('./admin-accesses');
+const { createAdminAccess, updateAdminAccess, runUserAction, archiveAdminAccess, renewAdminAccessToken, resendAdminAccessEmail } = require('./admin-accesses');
 const legacyBrokerAccess = require('./legacy-broker-access');
 const tokenVault = require('./access-token-vault');
 
@@ -11,7 +11,7 @@ function databaseError(context, error) {
 }
 
 async function organizationBroker(organizationId, userId) {
-  const { data, error } = await supabase.from('users').select('id, organization_id, role').eq('id', userId).maybeSingle();
+  const { data, error } = await supabase.from('users').select('id, organization_id, name, email, phone, role, status').eq('id', userId).maybeSingle();
   if (error) throw databaseError('get broker', error);
   if (!data || data.organization_id !== organizationId || data.role !== 'broker') {
     const notFound = new Error('Corretor não encontrado nesta organização.');
@@ -66,7 +66,19 @@ async function listSupervisorBrokers(organizationId) {
 }
 
 async function createSupervisorBroker(organizationId, input) {
-  return createAdminAccess({ ...input, organizationId, role: 'broker' });
+  const result = await createAdminAccess({ ...input, organizationId, role: 'broker' });
+  try {
+    return { ...result, emailDelivery: await resendAdminAccessEmail(result.user.user_id) };
+  } catch (error) {
+    // The access is already committed. An email failure must not create a duplicate on retry.
+    console.error('[SUPERVISOR BROKER ACCESS EMAIL ERROR]', error.message || error);
+    return { ...result, emailDelivery: { sent: false, recipient: input.email } };
+  }
+}
+
+async function resendSupervisorBrokerEmail(organizationId, userId) {
+  await organizationBroker(organizationId, userId);
+  return resendAdminAccessEmail(userId);
 }
 
 async function updateSupervisorBroker(organizationId, userId, input) {
@@ -133,14 +145,39 @@ async function listSupervisorLeads(organizationId) {
   catch (error) { throw databaseError('list operational leads', error); }
 }
 
-async function listSupervisorOperationalCustomers(organizationId) {
+async function assignSupervisorLead(organizationId, leadId, brokerUserId) {
+  const broker = await organizationBroker(organizationId, brokerUserId);
+  if (broker.status !== 'active') {
+    const error = new Error('Escolha um corretor ativo para receber o lead.');
+    error.statusCode = 409;
+    throw error;
+  }
+  const token = await tokenVault.get(broker.id);
+  if (!token) {
+    const error = new Error('O token do corretor não está disponível. Renove o token antes de enviar o lead.');
+    error.statusCode = 409;
+    throw error;
+  }
+  await legacyBrokerAccess.ensure({
+    id: broker.id,
+    name: broker.name,
+    email: broker.email,
+    phone: broker.phone,
+    organizationId
+  }, token);
+  return legacyBrokerAccess.assignOrganizationLead(organizationId, leadId, broker.id);
+}
+
+async function listSupervisorOperationalCustomers(organizationId, supervisorUserId) {
   try {
-    const { data, error } = await supabase.from('users').select('id').eq('organization_id', organizationId).eq('role', 'broker').eq('status', 'active');
+    const { data, error } = await supabase.from('users').select('id, role').eq('organization_id', organizationId).in('role', ['broker', 'supervisor']).eq('status', 'active');
     if (error) throw error;
-    const activeBrokerIds = new Set((data || []).map((user) => user.id));
-    return (await legacyBrokerAccess.organizationCustomers(organizationId)).filter((customer) => activeBrokerIds.has(customer.brokerUserId));
+    const allowedOwners = new Map((data || []).filter((user) => user.role === 'broker' || user.id === supervisorUserId).map((user) => [user.id, user.role]));
+    return (await legacyBrokerAccess.organizationCustomers(organizationId))
+      .filter((customer) => allowedOwners.has(customer.brokerUserId))
+      .map((customer) => ({ ...customer, ownerRole: allowedOwners.get(customer.brokerUserId) }));
   }
   catch (error) { throw databaseError('list operational customers', error); }
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, listSupervisorOperationalCustomers };
+module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };

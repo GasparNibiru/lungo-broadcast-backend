@@ -1,4 +1,7 @@
 const supabase = require('../database/supabase');
+const tokenVault = require('./access-token-vault');
+const { generateToken, hashToken, releaseArchivedEmail } = require('./admin-accesses');
+const { sendAccessEmail } = require('./access-email');
 
 const DUPLICATE_CODE = '23505';
 const PLAN_NOT_FOUND_CODE = 'P0002';
@@ -12,7 +15,10 @@ class AdminSubscriptionError extends Error {
 }
 
 async function createAdminSubscription(input) {
-  const { data, error } = await supabase.rpc('create_admin_subscription', {
+  if (input.generateAccess) await releaseArchivedEmail(input.email);
+  const token = input.generateAccess ? generateToken() : null;
+  const rpcName = input.generateAccess ? 'create_admin_subscription_with_access' : 'create_admin_subscription';
+  const parameters = {
     p_organization_name: input.organizationName,
     p_responsible_name: input.responsibleName,
     p_document_number: input.documentNumber || null,
@@ -26,8 +32,10 @@ async function createAdminSubscription(input) {
     p_first_payment_date: input.firstPaymentDate,
     p_first_payment_status: input.firstPaymentStatus,
     p_due_mode: input.dueMode,
-    p_fixed_due_day: input.fixedDueDay
-  });
+    p_fixed_due_day: input.fixedDueDay,
+    ...(input.generateAccess ? { p_access_role: input.accessRole, p_token_hash: hashToken(token) } : {})
+  };
+  const { data, error } = await supabase.rpc(rpcName, parameters);
 
   if (error) {
     if (error.code === DUPLICATE_CODE) {
@@ -36,6 +44,12 @@ async function createAdminSubscription(input) {
 
     if (error.code === PLAN_NOT_FOUND_CODE) {
       throw new AdminSubscriptionError('Plano não encontrado ou inativo.', 400);
+    }
+    if (error.message === 'email_already_exists') {
+      throw new AdminSubscriptionError('Já existe um acesso com este e-mail.', 409);
+    }
+    if (error.message === 'access_limit_reached') {
+      throw new AdminSubscriptionError('O plano não permite criar este acesso.', 409);
     }
 
     // Do not pass database details to the HTTP layer.
@@ -46,6 +60,30 @@ async function createAdminSubscription(input) {
     throw new AdminSubscriptionError('Não foi possível registrar a venda.', 500);
   }
 
+  if (input.generateAccess && data?.access?.user_id) {
+    try {
+      await tokenVault.set(data.access.user_id, token);
+    } catch (vaultError) {
+      // The database transaction is already committed and the token remains valid.
+      // Return it once to the Admin instead of inviting a duplicate sale retry.
+      console.error('[ADMIN SUBSCRIPTION TOKEN VAULT ERROR]', vaultError.message || vaultError);
+    }
+    let emailDelivery;
+    try {
+      emailDelivery = await sendAccessEmail({
+        email: input.email,
+        name: input.responsibleName,
+        organizationName: input.organizationName,
+        planName: data?.subscription?.plan_name || input.planCode,
+        token
+      });
+    } catch (emailError) {
+      // The sale and access are already committed. Never retry the transaction because email failed.
+      console.error('[ADMIN ACCESS EMAIL ERROR]', emailError.message || emailError);
+      emailDelivery = { sent: false, recipient: input.email };
+    }
+    return { ...data, token, emailDelivery };
+  }
   return data;
 }
 

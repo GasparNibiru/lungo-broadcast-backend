@@ -8,7 +8,7 @@ const {
 } = require('../services/admin-payments');
 
 const router = express.Router();
-const UPDATE_FIELDS = new Set(['dueDate', 'expectedAmount', 'paymentMethod', 'notes']);
+const UPDATE_FIELDS = new Set(['dueDate', 'expectedAmount', 'paidAt', 'paymentMethod', 'notes']);
 const CONFIRM_FIELDS = new Set(['paidAmount', 'paidAt', 'paymentMethod', 'notes']);
 
 function isUuid(value) {
@@ -54,6 +54,9 @@ function validateUpdate(body) {
   if (Object.prototype.hasOwnProperty.call(body, 'expectedAmount')
     && (typeof body.expectedAmount !== 'number' || !Number.isFinite(body.expectedAmount) || body.expectedAmount < 0)) {
     errors.push('expectedAmount deve ser um número maior ou igual a zero.');
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'paidAt') && !isIsoDate(body.paidAt)) {
+    errors.push('paidAt deve ser uma data válida no formato YYYY-MM-DD.');
   }
   validateOptionalText(body, 'paymentMethod', errors);
   validateOptionalText(body, 'notes', errors);

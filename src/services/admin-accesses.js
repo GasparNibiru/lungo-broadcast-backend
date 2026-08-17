@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const supabase = require('../database/supabase');
 const tokenVault = require('./access-token-vault');
+const { sendAccessEmail } = require('./access-email');
 
 const ACCESS_SELECT = `
   id,
@@ -31,6 +32,21 @@ function generateToken() {
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+function archivedEmail(userId) {
+  return `archived-${userId}@deleted.lungo.invalid`;
+}
+
+async function releaseArchivedEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return false;
+  const { data, error } = await supabase.from('users').select('id').eq('email', normalized).eq('status', 'inactive').maybeSingle();
+  if (error) throw databaseError('find archived email', error);
+  if (!data) return false;
+  const { error: updateError } = await supabase.from('users').update({ email: archivedEmail(data.id) }).eq('id', data.id).eq('status', 'inactive');
+  if (updateError) throw databaseError('release archived email', updateError);
+  return true;
 }
 
 function currentToken(tokens) {
@@ -99,6 +115,7 @@ async function listAdminAccesses() {
 }
 
 async function createAdminAccess(input) {
+  await releaseArchivedEmail(input.email);
   const token = generateToken();
   const tokenHash = hashToken(token);
   const { data, error } = await supabase.rpc('create_admin_access', {
@@ -140,7 +157,7 @@ async function runUserAction(userId, action) {
 }
 
 async function archiveAdminAccess(userId) {
-  const { data, error } = await supabase.from('users').update({ status: 'inactive' }).eq('id', userId).select('id').maybeSingle();
+  const { data, error } = await supabase.from('users').update({ status: 'inactive', email: archivedEmail(userId) }).eq('id', userId).select('id').maybeSingle();
   if (error) throw databaseError('archive access', error);
   if (!data) throw new AdminAccessError('Usuário não encontrado.', 404);
   const { error: tokenError } = await supabase.from('access_tokens').update({ status: 'revoked', revoked_at: new Date().toISOString() }).eq('user_id', userId).eq('status', 'active');
@@ -162,12 +179,36 @@ async function renewAdminAccessToken(userId, expiresAt) {
   return { user: await getAccess(userId), token };
 }
 
+async function resendAdminAccessEmail(userId) {
+  const access = await getAccess(userId);
+  if (access.status !== 'active') throw new AdminAccessError('O acesso precisa estar ativo para enviar o e-mail.', 409);
+  if (!access.active_token) throw new AdminAccessError('Este usuário não possui um token ativo.', 409);
+  const token = await tokenVault.get(userId);
+  if (!token) throw new AdminAccessError('O token não está disponível para reenvio. Renove o token primeiro.', 409);
+  try {
+    return await sendAccessEmail({
+      email: access.email,
+      name: access.name,
+      organizationName: access.organization_name || 'Lungo Corretores',
+      planName: access.role === 'supervisor' ? 'Supervisor' : access.role === 'broker' ? 'Corretor' : 'Admin Master',
+      token
+    });
+  } catch (error) {
+    console.error('[ADMIN ACCESS EMAIL RESEND ERROR]', error.message || error);
+    throw new AdminAccessError('Não foi possível enviar o e-mail pelo Zoho.', 502);
+  }
+}
+
 module.exports = {
   AdminAccessError,
+  generateToken,
+  hashToken,
+  releaseArchivedEmail,
   listAdminAccesses,
   createAdminAccess,
   updateAdminAccess,
   runUserAction,
   archiveAdminAccess,
-  renewAdminAccessToken
+  renewAdminAccessToken,
+  resendAdminAccessEmail
 };
