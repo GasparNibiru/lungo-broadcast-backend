@@ -60,4 +60,3 @@ end;
 $$;
 
 revoke all on function assert_admin_access_capacity(uuid, text, uuid) from public;
-
