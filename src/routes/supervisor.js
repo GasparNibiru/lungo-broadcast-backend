@@ -9,7 +9,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function sendError(res, error) {
-  const status = [400, 404, 409].includes(error.statusCode) ? error.statusCode : 500;
+  const status = [400, 403, 404, 409].includes(error.statusCode) ? error.statusCode : 500;
   return res.status(status).json({ ok: false, error: status === 500 ? 'Erro interno no servidor.' : error.message });
 }
 
@@ -40,7 +40,7 @@ router.post('/api/supervisor/brokers/:userId/token/renew', async (req, res) => {
 router.get('/api/supervisor/clients', async (req, res) => { try { return res.status(200).json({ ok: true, clients: await service.listSupervisorClients(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
 router.post('/api/supervisor/clients/import', async (req, res) => { try { return res.status(200).json({ ok: true, ...(await service.importSupervisorClients(req.accessUser.organizationId, req.body?.clientes)) }); } catch (error) { return sendError(res, error); } });
 router.get('/api/supervisor/leads', async (req, res) => { try { return res.status(200).json({ ok: true, leads: await service.listSupervisorLeads(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
-router.post('/api/supervisor/leads/:leadId/assign', async (req, res) => { const leadId = String(req.params.leadId || '').trim(); const brokerId = String(req.body?.brokerId || ''); if (!leadId || leadId.length > 160) return res.status(400).json({ ok: false, error: 'Lead inválido.' }); if (!UUID.test(brokerId)) return res.status(400).json({ ok: false, error: 'Corretor inválido.' }); if (Object.keys(req.body || {}).some((key) => key !== 'brokerId')) return res.status(400).json({ ok: false, error: 'Dados inválidos.' }); try { return res.status(200).json({ ok: true, lead: await service.assignSupervisorLead(req.accessUser.organizationId, leadId, brokerId) }); } catch (error) { return sendError(res, error); } });
+router.post('/api/supervisor/leads/:leadId/assign', async (req, res) => { const leadId = String(req.params.leadId || '').trim(); const brokerId = String(req.body?.brokerId || ''); if (!leadId || leadId.length > 160) return res.status(400).json({ ok: false, error: 'Lead inválido.' }); if (!UUID.test(brokerId)) return res.status(400).json({ ok: false, error: 'Corretor inválido.' }); if (Object.keys(req.body || {}).some((key) => key !== 'brokerId')) return res.status(400).json({ ok: false, error: 'Dados inválidos.' }); try { return res.status(200).json({ ok: true, lead: await service.assignSupervisorLead(req.accessUser.organizationId, leadId, brokerId, req.accessUser.id) }); } catch (error) { return sendError(res, error); } });
 router.get('/api/supervisor/operational-clients', async (req, res) => { try { return res.status(200).json({ ok: true, clients: await service.listSupervisorOperationalCustomers(req.accessUser.organizationId, req.accessUser.id) }); } catch (error) { return sendError(res, error); } });
 
 module.exports = router;
