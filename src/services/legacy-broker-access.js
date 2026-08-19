@@ -1,5 +1,6 @@
 const fs = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 
 const filePath = process.env.CLIENTS_FILE_PATH || path.join(process.cwd(), 'data', 'clientes.json');
 const leadsFilePath = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json');
@@ -102,15 +103,24 @@ async function assignOrganizationLead(organizationId, leadId, brokerUserId) {
       throw error;
     }
 
+    const sourceLead = leads[index];
+    const now = new Date().toISOString();
+    const deliveryIndex = leads.findIndex((lead) => String(lead.supervisorSourceLeadId || '') === String(sourceLead.id)
+      && organizationInstances.has(String(lead.instanceName || '').toLowerCase()));
+    const previousDelivery = deliveryIndex >= 0 ? leads[deliveryIndex] : null;
     assignedLead = {
-      ...leads[index],
+      ...sourceLead,
+      ...(previousDelivery || {}),
+      id: previousDelivery?.id || crypto.randomUUID(),
       instanceName: target.instanceName,
+      supervisorSourceLeadId: sourceLead.id,
       assignedBrokerUserId: brokerUserId,
       assignedBrokerName: target.nome || 'Corretor',
-      assignedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      assignedAt: now,
+      updatedAt: now
     };
-    leads[index] = assignedLead;
+    leads[index] = { ...sourceLead, assignedBrokerUserId: brokerUserId, assignedBrokerName: target.nome || 'Corretor', assignedAt: now, updatedAt: now };
+    if (deliveryIndex >= 0) leads[deliveryIndex] = assignedLead; else leads.push(assignedLead);
     await fs.mkdir(path.dirname(leadsFilePath), { recursive: true });
     const temporary = `${leadsFilePath}.assign.tmp`;
     await fs.writeFile(temporary, `${JSON.stringify(leads, null, 2)}\n`, 'utf8');
