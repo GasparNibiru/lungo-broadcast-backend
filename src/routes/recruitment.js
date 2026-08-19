@@ -18,12 +18,15 @@ function tokenHash(value) { return crypto.createHash('sha256').update(String(val
 function publicFrontendUrl() { return String(process.env.LUNGO_RECRUITMENT_URL || (process.env.NODE_ENV === 'staging' ? 'https://staging-crm.lungocorretores.com.br/disc-demo.html' : 'https://crm.lungocorretores.com.br/disc-demo.html')).trim(); }
 function candidateByToken(data, token) { const hash = tokenHash(token); return data.candidates.find((candidate) => candidate.disc?.tokenHash === hash); }
 function scoreDisc(answers) {
-  const counts = { D: 0, I: 0, S: 0, C: 0 }; answers.forEach((answer) => { counts[TRAITS[answer]] += 1; });
-  const scores = Object.fromEntries(TRAITS.map((trait) => [trait, Math.round((counts[trait] / answers.length) * 100)]));
+  const most = { D: 0, I: 0, S: 0, C: 0 }, least = { D: 0, I: 0, S: 0, C: 0 };
+  answers.forEach((answer) => { most[TRAITS[answer.most]] += 1; least[TRAITS[answer.least]] += 1; });
+  const raw = Object.fromEntries(TRAITS.map((trait) => [trait, answers.length + most[trait] - least[trait]]));
+  const rawTotal = Object.values(raw).reduce((sum, value) => sum + value, 0);
+  const scores = Object.fromEntries(TRAITS.map((trait) => [trait, Math.round((raw[trait] / rawTotal) * 100)]));
   const lead = TRAITS.reduce((current, trait) => scores[current] >= scores[trait] ? current : trait);
   scores[lead] += 100 - Object.values(scores).reduce((sum, value) => sum + value, 0);
   const distance = TRAITS.reduce((sum, trait) => sum + Math.abs(scores[trait] - DISC_TARGET[trait]), 0), normalized = (value) => Math.min(100, Math.round(value * 2.25));
-  return { scores, predominant: lead, match: Math.max(40, Math.min(98, Math.round(100 - distance * .62))), indicators: { commercialDrive: normalized(scores.D * .7 + scores.I * .3), autonomy: normalized(scores.D * .75 + scores.C * .25), discipline: normalized(scores.C * .6 + scores.S * .4), processAdherence: normalized(scores.C * .7 + scores.S * .3) } };
+  return { scores, most, least, predominant: lead, match: Math.max(40, Math.min(98, Math.round(100 - distance * .62))), indicators: { commercialDrive: normalized(scores.D * .7 + scores.I * .3), autonomy: normalized(scores.D * .75 + scores.C * .25), discipline: normalized(scores.C * .6 + scores.S * .4), processAdherence: normalized(scores.C * .7 + scores.S * .3) } };
 }
 function vacancyFor(data, user) { let item = data.vacancies.find((v) => v.organizationId === user.organizationId); if (!item) { item = { organizationId: user.organizationId, slug: `${slug(user.organization?.name || 'corretora')}-${user.organizationId.slice(0, 6)}`, companyName: user.organization?.name || 'Corretora', logo: '', title: 'Consultor de Planos de Saúde', headline: 'Venha construir sua carreira conosco', description: '', requirements: '', benefits: '', workModel: 'Presencial', location: '', active: false, updatedAt: new Date().toISOString() }; data.vacancies.push(item); } return item; }
 
@@ -70,7 +73,7 @@ router.post('/api/public/recruitment/disc/:token/complete', (req, res) => {
   if (!item) return res.status(404).json({ ok: false, error: 'Este link é inválido ou foi descontinuado.' });
   if (item.disc?.completedAt) return res.status(410).json({ ok: false, completed: true, error: 'Esta avaliação já foi finalizada.' });
   const answers = req.body?.answers;
-  if (!Array.isArray(answers) || answers.length !== 12 || answers.some((answer) => !Number.isInteger(answer) || answer < 0 || answer > 3)) return res.status(400).json({ ok: false, error: 'Respostas inválidas ou incompletas.' });
+  if (!Array.isArray(answers) || answers.length !== 12 || answers.some((answer) => !answer || !Number.isInteger(answer.most) || !Number.isInteger(answer.least) || answer.most < 0 || answer.most > 3 || answer.least < 0 || answer.least > 3 || answer.most === answer.least)) return res.status(400).json({ ok: false, error: 'Selecione uma opção diferente em Sou mais e Sou menos em todas as situações.' });
   const now = new Date().toISOString(); item.disc.result = scoreDisc(answers); item.disc.completedAt = now; item.stage = 'teste_realizado'; item.seenAt = null; item.updatedAt = now; save(data);
   return res.json({ ok: true, completed: true });
 });
