@@ -145,7 +145,7 @@ async function listSupervisorLeads(organizationId) {
   catch (error) { throw databaseError('list operational leads', error); }
 }
 
-async function assignSupervisorLead(organizationId, leadId, brokerUserId) {
+async function assignSupervisorLead(organizationId, leadId, brokerUserId, supervisorUserId) {
   const broker = await organizationBroker(organizationId, brokerUserId);
   if (broker.status !== 'active') {
     const error = new Error('Escolha um corretor ativo para receber o lead.');
@@ -165,7 +165,7 @@ async function assignSupervisorLead(organizationId, leadId, brokerUserId) {
     phone: broker.phone,
     organizationId
   }, token);
-  return legacyBrokerAccess.assignOrganizationLead(organizationId, leadId, broker.id);
+  return legacyBrokerAccess.assignOrganizationLead(organizationId, leadId, broker.id, supervisorUserId);
 }
 
 async function listSupervisorOperationalCustomers(organizationId, supervisorUserId) {

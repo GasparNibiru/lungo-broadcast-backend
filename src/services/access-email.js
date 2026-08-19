@@ -84,4 +84,29 @@ async function sendAccessEmail({ email, name, organizationName, planName, token 
   return { sent: true, recipient: email, messageId: data?.data?.messageId || null, provider: 'zoho-oauth' };
 }
 
-module.exports = { sendAccessEmail };
+async function sendRecruitmentEmail({ email, name, organizationName, vacancyTitle, testUrl }) {
+  const fromEmail = required('ZOHO_FROM_EMAIL');
+  required('ZOHO_FROM_NAME');
+  const safeName = escapeHtml(name), safeOrganization = escapeHtml(organizationName || 'Lungo Corretores');
+  const safeVacancy = escapeHtml(vacancyTitle || 'Consultor comercial'), safeUrl = escapeHtml(testUrl);
+  const content = `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f3f6f8;font-family:Arial,sans-serif;color:#17212b"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 12px"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #dfe7eb;border-radius:16px;overflow:hidden"><tr><td style="padding:22px 24px;background:#101820;color:#fff;text-align:center"><img src="https://imagensconrato.pagecor.com.br/logo-lungo.png" width="112" alt="Lungo Corretores" style="display:inline-block;width:112px;max-width:42%;height:auto;border:0"><div style="margin-top:9px;color:#a8c6c8;font-size:12px">Etapa do processo seletivo</div></td></tr><tr><td style="padding:28px"><h1 style="margin:0 0 14px;font-size:22px">Olá, ${safeName}!</h1><p style="margin:0 0 16px;line-height:1.55;color:#52616b">A equipe da ${safeOrganization} convidou você para realizar o mapeamento de perfil profissional referente à vaga de <strong>${safeVacancy}</strong>.</p><p style="margin:0 0 18px;line-height:1.55;color:#52616b">A avaliação possui 12 situações e leva aproximadamente 5 minutos.</p><div style="padding:22px 0;text-align:center"><a href="${safeUrl}" style="display:inline-block;padding:14px 24px;border-radius:9px;background:#14a89e;color:#fff;text-decoration:none;font-weight:bold">Realizar avaliação</a></div><p style="margin:0;font-size:12px;line-height:1.5;color:#77838a">Este link é individual e será desativado após o envio das respostas.</p></td></tr></table></td></tr></table></body></html>`;
+  const payload = { fromAddress: fromEmail, toAddress: email, subject: `Avaliação de perfil — ${vacancyTitle || 'Processo seletivo'}`, content, mailFormat: 'html', encoding: 'UTF-8' };
+  let accessToken = await getAccessToken(), accountId = await getAccountId(accessToken), data;
+  const send = () => zohoRequest(`https://mail.zoho.com/api/accounts/${encodeURIComponent(accountId)}/messages`, { method: 'POST', headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  try { data = await send(); } catch (error) { if (error.status !== 401) throw error; accessToken = await getAccessToken(true); accountIdCache = null; accountId = await getAccountId(accessToken); data = await send(); }
+  return { sent: true, recipient: email, messageId: data?.data?.messageId || null, provider: 'zoho-oauth' };
+}
+
+async function sendRecruitmentRejectionEmail({ email, name, organizationName, vacancyTitle, message }) {
+  const fromEmail = required('ZOHO_FROM_EMAIL'); required('ZOHO_FROM_NAME');
+  const safeName = escapeHtml(name), safeOrganization = escapeHtml(organizationName || 'Lungo Corretores'), safeVacancy = escapeHtml(vacancyTitle || 'processo seletivo');
+  const safeMessage = escapeHtml(message || 'Neste momento, seguiremos com outros perfis mais aderentes às necessidades da vaga. Agradecemos seu interesse e desejamos sucesso em sua trajetória profissional.').replace(/\n/g, '<br>');
+  const content = `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f3f6f8;font-family:Arial,sans-serif;color:#17212b"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 12px"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #dfe7eb;border-radius:16px;overflow:hidden"><tr><td style="padding:22px 24px;background:#101820;color:#fff;text-align:center"><img src="https://imagensconrato.pagecor.com.br/logo-lungo.png" width="112" alt="Lungo Corretores"></td></tr><tr><td style="padding:28px"><h1 style="margin:0 0 14px;font-size:22px">Olá, ${safeName}!</h1><p style="line-height:1.55;color:#52616b">Agradecemos sua participação no processo seletivo da ${safeOrganization} para a vaga de <strong>${safeVacancy}</strong>.</p><p style="line-height:1.65;color:#52616b">${safeMessage}</p></td></tr></table></td></tr></table></body></html>`;
+  const payload = { fromAddress: fromEmail, toAddress: email, subject: `Retorno sobre o processo seletivo — ${vacancyTitle || 'Lungo'}`, content, mailFormat: 'html', encoding: 'UTF-8' };
+  let accessToken = await getAccessToken(), accountId = await getAccountId(accessToken), data;
+  const send = () => zohoRequest(`https://mail.zoho.com/api/accounts/${encodeURIComponent(accountId)}/messages`, { method: 'POST', headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  try { data = await send(); } catch (error) { if (error.status !== 401) throw error; accessToken = await getAccessToken(true); accountIdCache = null; accountId = await getAccountId(accessToken); data = await send(); }
+  return { sent: true, recipient: email, messageId: data?.data?.messageId || null, provider: 'zoho-oauth' };
+}
+
+module.exports = { sendAccessEmail, sendRecruitmentEmail, sendRecruitmentRejectionEmail };

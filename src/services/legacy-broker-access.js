@@ -78,13 +78,14 @@ async function organizationLeads(organizationId) {
     });
 }
 
-async function assignOrganizationLead(organizationId, leadId, brokerUserId) {
+async function assignOrganizationLead(organizationId, leadId, brokerUserId, supervisorUserId) {
   let assignedLead;
   leadWriteQueue = leadWriteQueue.catch(() => {}).then(async () => {
     const clients = await read();
     const organizationClients = clients.filter((client) => client.organizationId === organizationId && client.ativo !== false);
     const organizationInstances = new Set(organizationClients.map((client) => String(client.instanceName || '').toLowerCase()).filter(Boolean));
     const target = organizationClients.find((client) => client.accessUserId === brokerUserId);
+    const supervisor = organizationClients.find((client) => client.accessUserId === supervisorUserId);
     if (!target?.instanceName) {
       const error = new Error('O corretor ainda não possui uma instância de acesso válida.');
       error.statusCode = 409;
@@ -102,15 +103,42 @@ async function assignOrganizationLead(organizationId, leadId, brokerUserId) {
       throw error;
     }
 
+    const selectedLead = leads[index];
+    const legacyOriginIndex = selectedLead.supervisorSourceLeadId ? leads.findIndex((lead) => String(lead.id) === String(selectedLead.supervisorSourceLeadId)) : index;
+    const originIndex = legacyOriginIndex >= 0 ? legacyOriginIndex : index;
+    const sourceLead = leads[originIndex];
+    const legacyDeliveryIndex = leads.findIndex((lead, leadIndex) => leadIndex !== originIndex && String(lead.supervisorSourceLeadId || '') === String(sourceLead.id)
+      && organizationInstances.has(String(lead.instanceName || '').toLowerCase()));
+    const operationalLead = legacyDeliveryIndex >= 0 ? leads[legacyDeliveryIndex] : selectedLead;
+    const sourceBelongsToSupervisor = Boolean(supervisor?.instanceName) && String(sourceLead.instanceName || '').toLowerCase() === String(supervisor.instanceName).toLowerCase();
+    const alreadyCompanyProvided = Boolean(sourceLead.companyProvided || operationalLead.companyProvided || selectedLead.supervisorSourceLeadId || legacyDeliveryIndex >= 0);
+    if (!alreadyCompanyProvided && !sourceBelongsToSupervisor) {
+      const error = new Error('Somente leads fornecidos pela empresa podem ser transferidos pelo supervisor.');
+      error.statusCode = 403;
+      throw error;
+    }
+    const now = new Date().toISOString();
+    const previousBrokerUserId = operationalLead.assignedBrokerUserId || null;
+    const history = Array.isArray(operationalLead.assignmentHistory) ? operationalLead.assignmentHistory.slice(-49) : [];
+    if (!previousBrokerUserId || String(previousBrokerUserId) !== String(brokerUserId)) history.push({ fromBrokerUserId: previousBrokerUserId, toBrokerUserId: brokerUserId, toBrokerName: target.nome || 'Corretor', transferredAt: now, transferredByUserId: supervisorUserId });
     assignedLead = {
-      ...leads[index],
+      ...sourceLead,
+      ...operationalLead,
+      id: operationalLead.id || sourceLead.id,
       instanceName: target.instanceName,
+      companyProvided: true,
+      companyProvidedByUserId: sourceLead.companyProvidedByUserId || supervisorUserId,
+      firstAssignedAt: sourceLead.firstAssignedAt || operationalLead.firstAssignedAt || sourceLead.assignedAt || operationalLead.assignedAt || now,
       assignedBrokerUserId: brokerUserId,
       assignedBrokerName: target.nome || 'Corretor',
-      assignedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      assignedAt: now,
+      lastTransferredAt: previousBrokerUserId && String(previousBrokerUserId) !== String(brokerUserId) ? now : (operationalLead.lastTransferredAt || null),
+      assignmentHistory: history,
+      updatedAt: now
     };
-    leads[index] = assignedLead;
+    delete assignedLead.supervisorSourceLeadId;
+    leads[originIndex] = assignedLead;
+    if (legacyDeliveryIndex >= 0) leads.splice(legacyDeliveryIndex, 1);
     await fs.mkdir(path.dirname(leadsFilePath), { recursive: true });
     const temporary = `${leadsFilePath}.assign.tmp`;
     await fs.writeFile(temporary, `${JSON.stringify(leads, null, 2)}\n`, 'utf8');
