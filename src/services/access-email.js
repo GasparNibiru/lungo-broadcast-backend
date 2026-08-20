@@ -109,4 +109,18 @@ async function sendRecruitmentRejectionEmail({ email, name, organizationName, va
   return { sent: true, recipient: email, messageId: data?.data?.messageId || null, provider: 'zoho-oauth' };
 }
 
-module.exports = { sendAccessEmail, sendRecruitmentEmail, sendRecruitmentRejectionEmail };
+async function sendTrainingNotificationEmail({ email, name, trainingTitle, track, publisherName, organizationName }) {
+  const fromEmail = required('ZOHO_FROM_EMAIL'); required('ZOHO_FROM_NAME');
+  const defaultAccessUrl = process.env.NODE_ENV === 'staging' ? 'https://staging-crm.lungocorretores.com.br/' : 'https://crm.lungocorretores.com.br/';
+  const accessUrl = String(process.env.LUNGO_ACCESS_URL || defaultAccessUrl).trim();
+  const safeName = escapeHtml(name), safeTitle = escapeHtml(trainingTitle), safeTrack = escapeHtml(track || 'Geral');
+  const safePublisher = escapeHtml(publisherName || organizationName || 'Lungo Corretores'), safeUrl = escapeHtml(accessUrl);
+  const content = `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f3f6f8;font-family:Arial,sans-serif;color:#17212b"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 12px"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #dfe7eb;border-radius:16px;overflow:hidden"><tr><td style="padding:22px 24px;background:#101820;color:#fff;text-align:center"><img src="https://imagensconrato.pagecor.com.br/logo-lungo.png" width="112" alt="Lungo Corretores"><div style="margin-top:9px;color:#a8c6c8;font-size:12px">Novo treinamento disponível</div></td></tr><tr><td style="padding:28px"><h1 style="margin:0 0 14px;font-size:22px">Olá, ${safeName}!</h1><p style="line-height:1.55;color:#52616b">${safePublisher} publicou um novo treinamento para você.</p><div style="padding:16px;background:#f5f8f9;border-radius:12px"><strong>${safeTitle}</strong><div style="margin-top:7px;font-size:12px;color:#6b7880">Trilha: ${safeTrack}</div></div><div style="padding:22px 0;text-align:center"><a href="${safeUrl}" style="display:inline-block;padding:13px 22px;border-radius:9px;background:#14a89e;color:#fff;text-decoration:none;font-weight:bold">Acessar treinamento</a></div></td></tr></table></td></tr></table></body></html>`;
+  const payload = { fromAddress: fromEmail, toAddress: email, subject: `Novo treinamento — ${trainingTitle}`, content, mailFormat: 'html', encoding: 'UTF-8' };
+  let accessToken = await getAccessToken(), accountId = await getAccountId(accessToken), data;
+  const send = () => zohoRequest(`https://mail.zoho.com/api/accounts/${encodeURIComponent(accountId)}/messages`, { method: 'POST', headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  try { data = await send(); } catch (error) { if (error.status !== 401) throw error; accessToken = await getAccessToken(true); accountIdCache = null; accountId = await getAccountId(accessToken); data = await send(); }
+  return { sent: true, recipient: email, messageId: data?.data?.messageId || null, provider: 'zoho-oauth' };
+}
+
+module.exports = { sendAccessEmail, sendRecruitmentEmail, sendRecruitmentRejectionEmail, sendTrainingNotificationEmail };
