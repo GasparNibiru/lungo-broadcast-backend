@@ -27,6 +27,16 @@ router.post('/api/access/auth/verify', requireAccess(), async (req, res) => {
   } catch (error) { return sendError(res, error); }
 });
 
+router.patch('/api/access/profile', requireAccess(['broker', 'supervisor']), async (req, res) => {
+  try { return res.status(200).json({ ok: true, user: await service.updateOwnProfile(req.accessUser.id, req.body?.name) }); }
+  catch (error) { return sendError(res, error); }
+});
+
+router.patch('/api/supervisor/branding', requireSupervisor, async (req, res) => {
+  try { return res.status(200).json({ ok: true, organization: await service.updateOrganizationBranding(req.accessUser.organizationId, req.body) }); }
+  catch (error) { return sendError(res, error); }
+});
+
 router.use('/api/supervisor', requireSupervisor);
 router.get('/api/supervisor/session', (req, res) => res.status(200).json({ ok: true, user: req.accessUser }));
 router.get('/api/supervisor/dashboard', async (req, res) => { try { return res.status(200).json({ ok: true, dashboard: await service.getSupervisorDashboard(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });

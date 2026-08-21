@@ -76,6 +76,25 @@ async function createSupervisorBroker(organizationId, input) {
   }
 }
 
+async function updateOrganizationBranding(organizationId, input) {
+  const name = String(input?.name || '').trim().slice(0, 160);
+  const logoUrl = String(input?.logo || '').trim();
+  if (name.length < 2) { const error = new Error('Informe o nome da corretora.'); error.statusCode = 400; throw error; }
+  if (logoUrl && !logoUrl.startsWith('data:image/') && !/^https:\/\//i.test(logoUrl)) { const error = new Error('Logo inválida.'); error.statusCode = 400; throw error; }
+  if (logoUrl.length > 1800000) { const error = new Error('Use uma logo menor.'); error.statusCode = 400; throw error; }
+  const { data, error } = await supabase.from('organizations').update({ name, logo_url: logoUrl || null }).eq('id', organizationId).select('id,name,logo_url').single();
+  if (error) throw databaseError('update organization branding', error);
+  return { id: data.id, name: data.name, logoUrl: data.logo_url || '' };
+}
+
+async function updateOwnProfile(userId, name) {
+  const cleanName = String(name || '').trim().slice(0, 120);
+  if (cleanName.length < 2) { const error = new Error('Informe seu nome.'); error.statusCode = 400; throw error; }
+  const { data, error } = await supabase.from('users').update({ name: cleanName }).eq('id', userId).select('id,name').single();
+  if (error) throw databaseError('update own profile', error);
+  return data;
+}
+
 async function resendSupervisorBrokerEmail(organizationId, userId) {
   await organizationBroker(organizationId, userId);
   return resendAdminAccessEmail(userId);
@@ -180,4 +199,4 @@ async function listSupervisorOperationalCustomers(organizationId, supervisorUser
   catch (error) { throw databaseError('list operational customers', error); }
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };
+module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateOrganizationBranding, updateOwnProfile, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };

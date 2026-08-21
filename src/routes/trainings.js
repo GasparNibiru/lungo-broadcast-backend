@@ -6,7 +6,7 @@ const requireAdmin = require('../middleware/require-admin');
 const { requireAccess } = require('../middleware/require-access');
 
 const router = express.Router();
-const TRAININGS_FILE = process.env.TRAININGS_FILE_PATH || (process.env.NODE_ENV === 'staging' ? '/data-staging/trainings.json' : path.resolve(__dirname, '../../data/trainings.json'));
+const TRAININGS_FILE = process.env.TRAININGS_FILE_PATH || (process.env.NODE_ENV === 'staging' ? '/data-staging/trainings.json' : process.env.NODE_ENV === 'production' ? '/data/trainings.json' : path.resolve(__dirname, '../../data/trainings.json'));
 
 function load() {
   try {

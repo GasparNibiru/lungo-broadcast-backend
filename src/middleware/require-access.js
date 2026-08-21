@@ -19,7 +19,7 @@ function requireAccess(roles = []) {
 
     const { data, error } = await supabase
       .from('access_tokens')
-      .select('id, user_id, status, expires_at, users!inner(id, organization_id, role, name, email, phone, status, organizations!users_organization_id_fkey(id, name, status))')
+      .select('id, user_id, status, expires_at, users!inner(id, organization_id, role, name, email, phone, status, organizations!users_organization_id_fkey(id, name, logo_url, status))')
       .eq('token_hash', hashToken(token))
       .eq('status', 'active')
       .maybeSingle();
@@ -36,7 +36,7 @@ function requireAccess(roles = []) {
     }
     if (allowed.size && !allowed.has(user.role)) return res.status(403).json({ ok: false, error: 'Perfil sem permissão para esta operação.' });
 
-    req.accessUser = { id: user.id, organizationId: user.organization_id, role: user.role, name: user.name, email: user.email, phone: user.phone, organization: user.organizations };
+    req.accessUser = { id: user.id, organizationId: user.organization_id, role: user.role, name: user.name, email: user.email, phone: user.phone, organization: user.organizations ? { id: user.organizations.id, name: user.organizations.name, logoUrl: user.organizations.logo_url || '', status: user.organizations.status } : null };
     req.accessToken = token;
     Promise.all([
       supabase.from('access_tokens').update({ last_used_at: new Date().toISOString() }).eq('id', data.id),

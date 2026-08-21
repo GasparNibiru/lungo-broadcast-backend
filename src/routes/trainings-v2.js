@@ -9,7 +9,7 @@ const { sendTrainingNotificationEmail } = require('../services/access-email');
 
 const router = express.Router();
 const baseDataDir = process.env.NODE_ENV === 'staging' ? '/data-staging' : process.env.NODE_ENV === 'production' ? '/data' : path.resolve(__dirname, '../../data');
-const TRAININGS_FILE = process.env.TRAININGS_FILE_PATH || (process.env.NODE_ENV === 'staging' ? '/data-staging/trainings.json' : path.resolve(__dirname, '../../data/trainings.json'));
+const TRAININGS_FILE = process.env.TRAININGS_FILE_PATH || (process.env.NODE_ENV === 'staging' ? '/data-staging/trainings.json' : process.env.NODE_ENV === 'production' ? '/data/trainings.json' : path.resolve(__dirname, '../../data/trainings.json'));
 const PROGRESS_FILE = process.env.TRAINING_PROGRESS_FILE_PATH || path.join(baseDataDir, 'training-progress.json');
 
 function loadFile(file) { try { const value = JSON.parse(fs.readFileSync(file, 'utf8')); return Array.isArray(value) ? value : []; } catch { return []; } }
