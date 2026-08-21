@@ -28,6 +28,7 @@ const termsAcceptanceRouter = require('./routes/terms-acceptance');
 const calendarRouter = require('./routes/calendar');
 const leadMarketplaceRouter = require('./routes/lead-marketplace');
 const teamGoalsRouter = require('./routes/team-goals');
+const campaignMediaRouter = require('./routes/campaign-media');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -50,7 +51,7 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({ origin: true, credentials: false }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(databaseHealthRouter);
 app.use(adminSubscriptionsRouter);
@@ -70,6 +71,7 @@ app.use(termsAcceptanceRouter);
 app.use(calendarRouter);
 app.use(leadMarketplaceRouter);
 app.use(teamGoalsRouter);
+app.use(campaignMediaRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
