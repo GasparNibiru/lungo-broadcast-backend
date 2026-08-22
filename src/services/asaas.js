@@ -79,7 +79,7 @@ async function createCheckout(result, input) {
     const checkout = await request('/checkouts', {
       method: 'POST',
       body: JSON.stringify({
-        billingTypes: ['PIX', 'CREDIT_CARD'],
+        billingTypes: ['CREDIT_CARD'],
         chargeTypes: ['RECURRENT'],
         minutesToExpire: 60,
         callback: {
