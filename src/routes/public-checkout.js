@@ -33,7 +33,7 @@ router.post('/api/public/checkout', async (req, res) => {
   } catch (error) {
     console.error('[PUBLIC CHECKOUT ERROR]', error.message || error);
     const duplicate = error.code === '23505';
-    return res.status(duplicate ? 409 : 500).json({ ok: false, error: duplicate ? 'Já existe uma contratação com este CPF/CNPJ ou e-mail.' : 'Não foi possível iniciar a contratação.' });
+    return res.status(duplicate ? 409 : 500).json({ ok: false, error: duplicate ? 'Já existe uma organização ativa com este CPF/CNPJ.' : 'Não foi possível iniciar a contratação.' });
   }
 });
 
