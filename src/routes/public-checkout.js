@@ -6,13 +6,13 @@ const attempts = new Map();
 function limited(req) {
   const key = req.ip || 'unknown', now = Date.now(), windowStart = now - 15 * 60 * 1000;
   const recent = (attempts.get(key) || []).filter((time) => time > windowStart);
-  recent.push(now); attempts.set(key, recent); return recent.length > 6;
+  recent.push(now); attempts.set(key, recent); return recent.length > 20;
 }
 function digits(value) { return String(value || '').replace(/\D/g, ''); }
 function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '')); }
 
 router.post('/api/public/checkout', async (req, res) => {
-  if (limited(req)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde alguns minutos.' });
+  if (limited(req)) { res.set('Retry-After', '900'); return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos antes de tentar novamente.' }); }
   const body = req.body || {}, documentNumber = digits(body.documentNumber), extraAccesses = Number(body.extraAccesses);
   const errors = [];
   if (!String(body.organizationName || '').trim()) errors.push('Nome ou razão social é obrigatório.');
