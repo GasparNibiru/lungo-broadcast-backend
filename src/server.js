@@ -29,6 +29,7 @@ const calendarRouter = require('./routes/calendar');
 const leadMarketplaceRouter = require('./routes/lead-marketplace');
 const teamGoalsRouter = require('./routes/team-goals');
 const campaignMediaRouter = require('./routes/campaign-media');
+const asaasWebhooksRouter = require('./routes/asaas-webhooks');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -72,6 +73,7 @@ app.use(calendarRouter);
 app.use(leadMarketplaceRouter);
 app.use(teamGoalsRouter);
 app.use(campaignMediaRouter);
+app.use(asaasWebhooksRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
