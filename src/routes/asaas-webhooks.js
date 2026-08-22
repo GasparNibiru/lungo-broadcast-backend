@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const supabase = require('../database/supabase');
+const publicCheckout = require('../services/public-checkout');
 
 const router = express.Router();
 
@@ -25,6 +26,7 @@ async function savePayment(event, payment) {
   if (paymentId) await supabase.from('payments').update(row).eq('id', paymentId);
   else { const { data, error } = await supabase.from('payments').upsert(row, { onConflict: 'subscription_id,competence' }).select('id').single(); if (error) throw error; paymentId = data.id; }
   if (current?.status !== status) await supabase.from('payment_history').insert({ payment_id: paymentId, action: `asaas_${String(event).toLowerCase()}`, old_status: current?.status || null, new_status: status, amount: Number(payment.value || 0), notes: `Evento Asaas ${event}` });
+  if (status === 'paid') await publicCheckout.activate(subscription.id);
 }
 
 async function saveSubscription(event, subscription) {
