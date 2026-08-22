@@ -26,7 +26,8 @@ router.post('/api/public/checkout', async (req, res) => {
   if (errors.length) return res.status(400).json({ ok: false, error: 'Confira os dados informados.', details: errors });
   try {
     const result = await checkout.create({ organizationName: body.organizationName.trim(), responsibleName: body.responsibleName.trim(),
-      documentNumber, email: body.email.trim(), phone: digits(body.phone), planCode: body.planCode, extraAccesses });
+      documentNumber, email: body.email.trim(), phone: digits(body.phone), planCode: body.planCode, extraAccesses,
+      checkoutToken: typeof body.checkoutToken === 'string' && body.checkoutToken.length >= 32 ? body.checkoutToken : undefined });
     if (result.billing?.pending || !result.billing?.invoiceUrl) return res.status(502).json({ ok: false, error: result.billing?.error || 'A cobrança ficou pendente de sincronização.', checkoutId: result.checkoutId, checkoutToken: result.checkoutToken });
     return res.status(201).json({ ok: true, ...result });
   } catch (error) {
@@ -38,7 +39,7 @@ router.post('/api/public/checkout', async (req, res) => {
 
 router.post('/api/public/checkout/status', async (req, res) => {
   const id = String(req.body?.checkoutId || ''), token = String(req.body?.checkoutToken || '');
-  if (!/^[0-9a-f-]{36}$/i.test(id) || token.length < 32) return res.status(400).json({ ok: false, error: 'Contratação inválida.' });
+  if ((id && !/^[0-9a-f-]{36}$/i.test(id)) || token.length < 32) return res.status(400).json({ ok: false, error: 'Contratação inválida.' });
   const result = await checkout.status(id, token);
   return result ? res.json({ ok: true, ...result }) : res.status(404).json({ ok: false, error: 'Contratação não encontrada.' });
 });

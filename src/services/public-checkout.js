@@ -10,7 +10,7 @@ const checkoutHash = (token) => crypto.createHash('sha256').update(token, 'utf8'
 
 async function create(input) {
   await releaseArchivedEmail(input.email);
-  const checkoutToken = crypto.randomBytes(32).toString('base64url');
+  const checkoutToken = input.checkoutToken || crypto.randomBytes(32).toString('base64url');
   const { data, error } = await supabase.rpc('create_public_checkout', {
     p_organization_name: input.organizationName,
     p_responsible_name: input.responsibleName,
@@ -31,9 +31,11 @@ async function create(input) {
 }
 
 async function status(checkoutId, token) {
-  const { data } = await supabase.from('subscriptions')
+  let query = supabase.from('subscriptions')
     .select('id,activation_status,activation_error,total_price,asaas_sync_status,asaas_last_error,plans(code,name),payments(status,invoice_url)')
-    .eq('id', checkoutId).eq('checkout_source', 'public').eq('checkout_token_hash', checkoutHash(token)).maybeSingle();
+    .eq('checkout_source', 'public').eq('checkout_token_hash', checkoutHash(token));
+  if (checkoutId) query = query.eq('id', checkoutId);
+  const { data } = await query.maybeSingle();
   if (!data) return null;
   const payment = (data.payments || []).find((item) => item.status === 'paid') || data.payments?.[0] || null;
   return { checkoutId: data.id, activationStatus: data.activation_status, paymentStatus: payment?.status || 'pending',
