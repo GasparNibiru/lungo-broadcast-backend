@@ -8,22 +8,43 @@ const { sendAccessEmail } = require('./access-email');
 const PUBLIC_PLANS = new Set(['individual', 'equipe', 'corretora10']);
 const checkoutHash = (token) => crypto.createHash('sha256').update(token, 'utf8').digest('hex');
 
+async function checkoutByToken(checkoutToken) {
+  const { data, error } = await supabase.from('subscriptions')
+    .select('*, plans(*), organizations(*), payments(*)')
+    .eq('checkout_source', 'public')
+    .eq('checkout_token_hash', checkoutHash(checkoutToken))
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    organization: data.organizations,
+    subscription: { ...data, plan_name: data.plans?.name },
+    payment: [...(data.payments || [])].sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))[0]
+  };
+}
+
 async function create(input) {
   await releaseArchivedEmail(input.email);
   const checkoutToken = input.checkoutToken || crypto.randomBytes(32).toString('base64url');
-  const { data, error } = await supabase.rpc('create_public_checkout', {
-    p_organization_name: input.organizationName,
-    p_responsible_name: input.responsibleName,
-    p_document_number: input.documentNumber,
-    p_email: input.email.toLowerCase(),
-    p_phone: input.phone,
-    p_organization_type: input.planCode === 'individual' ? 'individual' : 'brokerage',
-    p_plan_code: input.planCode,
-    p_extra_accesses: input.extraAccesses,
-    p_checkout_token_hash: checkoutHash(checkoutToken)
-  });
-  if (error) throw error;
-  const billing = await asaas.createCheckout(data, { ...input, firstPaymentDate: new Date().toISOString().slice(0, 10) });
+  let data = await checkoutByToken(checkoutToken);
+  if (!data) {
+    const created = await supabase.rpc('create_public_checkout', {
+      p_organization_name: input.organizationName,
+      p_responsible_name: input.responsibleName,
+      p_document_number: input.documentNumber,
+      p_email: input.email.toLowerCase(),
+      p_phone: input.phone,
+      p_organization_type: input.planCode === 'individual' ? 'individual' : 'brokerage',
+      p_plan_code: input.planCode,
+      p_extra_accesses: input.extraAccesses,
+      p_checkout_token_hash: checkoutHash(checkoutToken)
+    });
+    if (created.error) throw created.error;
+    data = created.data;
+  }
+  const billing = data.subscription.asaas_checkout_url
+    ? { enabled: true, checkoutId: data.subscription.asaas_checkout_id, invoiceUrl: data.subscription.asaas_checkout_url, status: data.subscription.asaas_checkout_status || 'PENDING' }
+    : await asaas.createCheckout(data, { ...input, firstPaymentDate: new Date().toISOString().slice(0, 10) });
   return { checkoutId: data.subscription.id, checkoutToken, billing,
     plan: { code: input.planCode, name: data.subscription.plan_name || input.planCode,
       basePrice: Number(data.subscription.base_price), extraAccesses: Number(data.subscription.extra_accesses),
