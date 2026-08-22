@@ -23,7 +23,7 @@ async function create(input) {
     p_checkout_token_hash: checkoutHash(checkoutToken)
   });
   if (error) throw error;
-  const billing = await asaas.provisionSubscription(data, { ...input, firstPaymentDate: new Date().toISOString().slice(0, 10) });
+  const billing = await asaas.createCheckout(data, { ...input, firstPaymentDate: new Date().toISOString().slice(0, 10) });
   return { checkoutId: data.subscription.id, checkoutToken, billing,
     plan: { code: input.planCode, name: data.subscription.plan_name || input.planCode,
       basePrice: Number(data.subscription.base_price), extraAccesses: Number(data.subscription.extra_accesses),
@@ -32,14 +32,15 @@ async function create(input) {
 
 async function status(checkoutId, token) {
   let query = supabase.from('subscriptions')
-    .select('id,activation_status,activation_error,total_price,asaas_sync_status,asaas_last_error,plans(code,name),payments(status,invoice_url)')
+    .select('id,activation_status,activation_error,total_price,asaas_sync_status,asaas_last_error,asaas_checkout_status,asaas_checkout_url,plans(code,name),payments(status,invoice_url)')
     .eq('checkout_source', 'public').eq('checkout_token_hash', checkoutHash(token));
   if (checkoutId) query = query.eq('id', checkoutId);
   const { data } = await query.maybeSingle();
   if (!data) return null;
   const payment = (data.payments || []).find((item) => item.status === 'paid') || data.payments?.[0] || null;
   return { checkoutId: data.id, activationStatus: data.activation_status, paymentStatus: payment?.status || 'pending',
-    invoiceUrl: payment?.invoice_url || null, totalPrice: Number(data.total_price), planName: data.plans?.name || null,
+    invoiceUrl: data.asaas_checkout_url || payment?.invoice_url || null, checkoutStatus: data.asaas_checkout_status || null,
+    totalPrice: Number(data.total_price), planName: data.plans?.name || null,
     ready: data.activation_status === 'email_sent', error: data.activation_error || data.asaas_last_error || null };
 }
 

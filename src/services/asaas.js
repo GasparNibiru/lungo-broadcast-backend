@@ -63,6 +63,64 @@ async function provisionSubscription(result, input) {
   }
 }
 
+function checkoutReturnUrl(state) {
+  const base = String(process.env.PUBLIC_CHECKOUT_RETURN_URL || 'https://staging-crm.lungocorretores.com.br/').trim();
+  const url = new URL(base);
+  url.searchParams.set('checkout', state);
+  return url.toString();
+}
+
+async function createCheckout(result, input) {
+  if (!enabled() || input.planCode === 'free') return { enabled: false };
+  if (!digits(input.documentNumber)) throw Object.assign(new Error('CPF/CNPJ é obrigatório para gerar o checkout.'), { statusCode: 400 });
+  const organization = { ...result.organization, document_number: input.documentNumber, email: input.email, phone: input.phone };
+  try {
+    const customerId = await ensureCustomer(organization);
+    const checkout = await request('/checkouts', {
+      method: 'POST',
+      body: JSON.stringify({
+        billingTypes: ['PIX', 'CREDIT_CARD'],
+        chargeTypes: ['RECURRENT'],
+        minutesToExpire: 60,
+        callback: {
+          successUrl: checkoutReturnUrl('success'),
+          cancelUrl: checkoutReturnUrl('cancelled'),
+          expiredUrl: checkoutReturnUrl('expired')
+        },
+        items: [{
+          name: `Plano ${result.subscription.plan_name || input.planCode}`,
+          description: `${Number(result.subscription.extra_accesses || 0)} acesso(s) adicional(is)`,
+          quantity: 1,
+          value: Number(result.subscription.total_price)
+        }],
+        customer: customerId,
+        subscription: {
+          cycle: 'MONTHLY',
+          nextDueDate: `${input.firstPaymentDate} 00:00:00`
+        },
+        externalReference: result.subscription.id
+      })
+    });
+    const checkoutHost = required('ASAAS_BASE_URL').includes('sandbox') ? 'https://sandbox.asaas.com' : 'https://www.asaas.com';
+    const invoiceUrl = checkout.link || `${checkoutHost}/checkoutSession/show?id=${encodeURIComponent(checkout.id)}`;
+    const subscriptionUpdate = await supabase.from('subscriptions').update({
+      asaas_checkout_id: checkout.id,
+      asaas_checkout_status: checkout.status || 'PENDING',
+      asaas_checkout_url: invoiceUrl,
+      asaas_sync_status: 'checkout_created',
+      asaas_last_error: null,
+      asaas_synced_at: new Date().toISOString()
+    }).eq('id', result.subscription.id);
+    if (subscriptionUpdate.error) throw new Error('Não foi possível vincular o checkout Asaas.');
+    const paymentUpdate = await supabase.from('payments').update({ invoice_url: invoiceUrl }).eq('id', result.payment.id);
+    if (paymentUpdate.error) throw new Error('Não foi possível vincular o endereço do checkout.');
+    return { enabled: true, customerId, checkoutId: checkout.id, invoiceUrl, status: checkout.status || 'PENDING' };
+  } catch (error) {
+    await supabase.from('subscriptions').update({ asaas_sync_status: 'failed', asaas_last_error: String(error.message || 'Falha na integração').slice(0, 500), asaas_synced_at: new Date().toISOString() }).eq('id', result.subscription.id);
+    return { enabled: true, pending: true, error: error.message };
+  }
+}
+
 async function retrySubscription(subscriptionId) {
   const { data: subscription, error } = await supabase.from('subscriptions').select('*, plans(code,name), organizations(*)').eq('id', subscriptionId).single();
   if (error || !subscription) throw Object.assign(new Error('Assinatura não encontrada.'), { statusCode: 404 });
@@ -71,4 +129,4 @@ async function retrySubscription(subscriptionId) {
   return provisionSubscription({ organization: subscription.organizations, subscription: { ...subscription, plan_name: subscription.plans?.name }, payment }, { planCode: subscription.plans?.code, documentNumber: subscription.organizations.document_number, email: subscription.organizations.email, phone: subscription.organizations.phone, firstPaymentDate: payment.due_date });
 }
 
-module.exports = { enabled, provisionSubscription, retrySubscription, request };
+module.exports = { enabled, createCheckout, provisionSubscription, retrySubscription, request };
