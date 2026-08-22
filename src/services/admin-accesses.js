@@ -42,13 +42,18 @@ async function releaseArchivedEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return false;
   const { data, error } = await supabase.from('users')
-    .select('id, organizations!inner(status)')
+    .select('id, organization_id')
     .eq('email', normalized)
-    .eq('organizations.status', 'inactive')
     .limit(1)
     .maybeSingle();
   if (error) throw databaseError('find archived email', error);
   if (!data) return false;
+  const { data: organization, error: organizationError } = await supabase.from('organizations')
+    .select('status')
+    .eq('id', data.organization_id)
+    .maybeSingle();
+  if (organizationError) throw databaseError('find archived email organization', organizationError);
+  if (organization?.status !== 'inactive') return false;
   const { error: updateError } = await supabase.from('users').update({ status: 'inactive', email: archivedEmail(data.id) }).eq('id', data.id);
   if (updateError) throw databaseError('release archived email', updateError);
   const { error: tokenError } = await supabase.from('access_tokens')
