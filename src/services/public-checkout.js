@@ -2,13 +2,14 @@ const crypto = require('crypto');
 const supabase = require('../database/supabase');
 const asaas = require('./asaas');
 const tokenVault = require('./access-token-vault');
-const { generateToken, hashToken } = require('./admin-accesses');
+const { generateToken, hashToken, releaseArchivedEmail } = require('./admin-accesses');
 const { sendAccessEmail } = require('./access-email');
 
 const PUBLIC_PLANS = new Set(['individual', 'equipe', 'corretora10']);
 const checkoutHash = (token) => crypto.createHash('sha256').update(token, 'utf8').digest('hex');
 
 async function create(input) {
+  await releaseArchivedEmail(input.email);
   const checkoutToken = crypto.randomBytes(32).toString('base64url');
   const { data, error } = await supabase.rpc('create_public_checkout', {
     p_organization_name: input.organizationName,
