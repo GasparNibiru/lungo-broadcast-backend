@@ -28,7 +28,7 @@ router.post('/api/public/checkout', async (req, res) => {
     const result = await checkout.create({ organizationName: body.organizationName.trim(), responsibleName: body.responsibleName.trim(),
       documentNumber, email: body.email.trim(), phone: digits(body.phone), planCode: body.planCode, extraAccesses,
       checkoutToken: typeof body.checkoutToken === 'string' && body.checkoutToken.length >= 32 ? body.checkoutToken : undefined });
-    if (result.billing?.pending || !result.billing?.invoiceUrl) return res.status(502).json({ ok: false, error: result.billing?.error || 'A cobrança ficou pendente de sincronização.', checkoutId: result.checkoutId, checkoutToken: result.checkoutToken });
+    if (result.billing?.pending || !result.billing?.invoiceUrl) return res.status(422).json({ ok: false, error: result.billing?.error || 'A cobrança ficou pendente de sincronização.', checkoutId: result.checkoutId, checkoutToken: result.checkoutToken });
     return res.status(201).json({ ok: true, ...result });
   } catch (error) {
     console.error('[PUBLIC CHECKOUT ERROR]', error.message || error);
