@@ -22,6 +22,7 @@ router.post('/api/public/checkout', async (req, res) => {
   if (digits(body.phone).length < 10) errors.push('Informe um WhatsApp válido.');
   if (!checkout.PUBLIC_PLANS.has(body.planCode)) errors.push('Plano inválido.');
   if (!Number.isInteger(extraAccesses) || extraAccesses < 0 || extraAccesses > 100) errors.push('Quantidade de adicionais inválida.');
+  if (body.planCode === 'individual' && extraAccesses !== 0) errors.push('O Plano Individual não aceita acessos adicionais.');
   if (body.acceptedTerms !== true) errors.push('Você precisa aceitar os termos.');
   if (errors.length) return res.status(400).json({ ok: false, error: 'Confira os dados informados.', details: errors });
   try {

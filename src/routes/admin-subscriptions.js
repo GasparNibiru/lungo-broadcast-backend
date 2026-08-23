@@ -29,8 +29,8 @@ function validate(body) {
   if (!Number.isInteger(body.extraAccesses) || body.extraAccesses < 0) {
     errors.push('extraAccesses deve ser um número inteiro maior ou igual a zero.');
   }
-  if (body.planCode === 'free' && body.extraAccesses !== 0) {
-    errors.push('O Plano Free não aceita acessos extras.');
+  if (['free', 'individual'].includes(body.planCode) && body.extraAccesses !== 0) {
+    errors.push(`O Plano ${body.planCode === 'free' ? 'Free' : 'Individual'} não aceita acessos extras.`);
   }
   if (typeof body.legacy !== 'boolean') errors.push('legacy deve ser booleano.');
   if (body.documentNumber != null && typeof body.documentNumber !== 'string') {

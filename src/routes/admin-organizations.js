@@ -49,6 +49,7 @@ function validateUpdate(body) {
   if (has('organizationType') && !ORGANIZATION_TYPES.has(body.organizationType)) errors.push('organizationType deve ser individual ou brokerage.');
   if (has('planCode') && (typeof body.planCode !== 'string' || !body.planCode.trim())) errors.push('planCode deve ser um texto não vazio.');
   if (has('extraAccesses') && (!Number.isInteger(body.extraAccesses) || body.extraAccesses < 0)) errors.push('extraAccesses deve ser um número inteiro maior ou igual a zero.');
+  if (body.planCode === 'individual' && body.extraAccesses !== 0) errors.push('O Plano Individual não aceita acessos extras.');
   if (has('legacy') && typeof body.legacy !== 'boolean') errors.push('legacy deve ser booleano.');
   if (has('nextDueDate') && !isIsoDate(body.nextDueDate)) errors.push('nextDueDate deve ser uma data válida no formato YYYY-MM-DD.');
   if (has('dueMode') && !DUE_MODES.has(body.dueMode)) errors.push('dueMode deve ser thirty_days ou fixed_day.');
