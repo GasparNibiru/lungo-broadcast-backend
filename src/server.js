@@ -53,7 +53,7 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({ origin: true, credentials: false }));
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '5mb', verify(req, _res, buffer) { req.rawBody = Buffer.from(buffer); } }));
 app.use(express.urlencoded({ extended: true }));
 app.use(databaseHealthRouter);
 app.use(adminSubscriptionsRouter);
