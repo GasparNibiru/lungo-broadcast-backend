@@ -29,7 +29,7 @@ router.post('/api/access/auth/verify', requireAccess(), async (req, res) => {
 });
 
 router.patch('/api/access/profile', requireAccess(['broker', 'supervisor']), async (req, res) => {
-  try { return res.status(200).json({ ok: true, user: await service.updateOwnProfile(req.accessUser.id, req.body?.name) }); }
+  try { return res.status(200).json({ ok: true, user: await service.updateOwnProfile(req.accessUser.id, req.body || {}) }); }
   catch (error) { return sendError(res, error); }
 });
 
