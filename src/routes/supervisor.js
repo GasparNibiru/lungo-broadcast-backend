@@ -2,6 +2,7 @@ const express = require('express');
 const { requireAccess } = require('../middleware/require-access');
 const service = require('../services/supervisor');
 const legacyBrokerAccess = require('../services/legacy-broker-access');
+const cancellation = require('../services/subscription-cancellation');
 
 const router = express.Router();
 const requireSupervisor = requireAccess('supervisor');
@@ -9,7 +10,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function sendError(res, error) {
-  const status = [400, 403, 404, 409].includes(error.statusCode) ? error.statusCode : 500;
+  const status = [400, 403, 404, 409, 502].includes(error.statusCode) ? error.statusCode : 500;
   return res.status(status).json({ ok: false, error: status === 500 ? 'Erro interno no servidor.' : error.message });
 }
 
@@ -39,6 +40,14 @@ router.patch('/api/supervisor/branding', requireSupervisor, async (req, res) => 
 
 router.use('/api/supervisor', requireSupervisor);
 router.get('/api/supervisor/session', (req, res) => res.status(200).json({ ok: true, user: req.accessUser }));
+router.get('/api/supervisor/subscription', async (req, res) => { try { return res.status(200).json({ ok: true, subscription: await cancellation.current(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
+router.post('/api/supervisor/subscription/cancel', async (req, res) => {
+  if (String(req.body?.confirmation || '').trim().toUpperCase() !== 'CANCELAR') return res.status(400).json({ ok: false, error: 'Digite CANCELAR para confirmar.' });
+  try { const subscription = await cancellation.requestCancellation({ organizationId: req.accessUser.organizationId,
+    mode: 'period_end', requestedBy: `user:${req.accessUser.id}`, reason: String(req.body?.reason || '').trim() });
+    return res.status(200).json({ ok: true, subscription });
+  } catch (error) { return sendError(res, error); }
+});
 router.get('/api/supervisor/dashboard', async (req, res) => { try { return res.status(200).json({ ok: true, dashboard: await service.getSupervisorDashboard(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
 router.get('/api/supervisor/brokers', async (req, res) => { try { return res.status(200).json({ ok: true, brokers: await service.listSupervisorBrokers(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
 router.post('/api/supervisor/brokers', async (req, res) => { const payload = brokerPayload(req.body, true); if (payload.error) return res.status(400).json({ ok: false, error: payload.error }); try { const result = await service.createSupervisorBroker(req.accessUser.organizationId, payload.value); return res.status(201).json({ ok: true, broker: result.user, token: result.token, emailDelivery: result.emailDelivery }); } catch (error) { return sendError(res, error); } });

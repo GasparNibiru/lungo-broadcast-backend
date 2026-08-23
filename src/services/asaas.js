@@ -129,4 +129,10 @@ async function retrySubscription(subscriptionId) {
   return provisionSubscription({ organization: subscription.organizations, subscription: { ...subscription, plan_name: subscription.plans?.name }, payment }, { planCode: subscription.plans?.code, documentNumber: subscription.organizations.document_number, email: subscription.organizations.email, phone: subscription.organizations.phone, firstPaymentDate: payment.due_date });
 }
 
-module.exports = { enabled, createCheckout, provisionSubscription, retrySubscription, request };
+async function cancelSubscription(subscriptionId) {
+  if (!enabled() || !subscriptionId) return { enabled: false };
+  await request(`/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: 'DELETE' });
+  return { enabled: true, cancelled: true };
+}
+
+module.exports = { enabled, cancelSubscription, createCheckout, provisionSubscription, retrySubscription, request };

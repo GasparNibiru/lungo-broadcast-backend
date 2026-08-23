@@ -36,6 +36,9 @@ function requireAccess(roles = []) {
     }
     if (allowed.size && !allowed.has(user.role)) return res.status(403).json({ ok: false, error: 'Perfil sem permissão para esta operação.' });
 
+    const finalized = await supabase.rpc('finalize_due_subscription_cancellation', { p_organization_id: user.organization_id });
+    if (!finalized.error && finalized.data === true) return res.status(401).json({ ok: false, error: 'Assinatura encerrada ao final do período contratado.' });
+
     req.accessUser = { id: user.id, organizationId: user.organization_id, role: user.role, name: user.name, email: user.email, phone: user.phone, organization: user.organizations ? { id: user.organizations.id, name: user.organizations.name, logoUrl: user.organizations.logo_url || '', status: user.organizations.status } : null };
     req.accessToken = token;
     Promise.all([
