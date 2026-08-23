@@ -33,6 +33,22 @@ router.patch('/api/access/profile', requireAccess(['broker', 'supervisor']), asy
   catch (error) { return sendError(res, error); }
 });
 
+const requireSubscriptionOwner = requireAccess(['broker', 'supervisor']);
+async function ownerSubscription(req, res, action) {
+  try {
+    if (!await cancellation.isOrganizationOwner(req.accessUser.organizationId, req.accessUser.id)) return res.status(403).json({ ok: false, error: 'Somente o titular pode administrar a assinatura.' });
+    return await action(req, res);
+  } catch (error) { return sendError(res, error); }
+}
+router.get('/api/access/subscription', requireSubscriptionOwner, (req, res) => ownerSubscription(req, res, async () =>
+  res.status(200).json({ ok: true, subscription: await cancellation.current(req.accessUser.organizationId) })));
+router.post('/api/access/subscription/cancel', requireSubscriptionOwner, (req, res) => ownerSubscription(req, res, async () => {
+  if (String(req.body?.confirmation || '').trim().toUpperCase() !== 'CANCELAR') return res.status(400).json({ ok: false, error: 'Digite CANCELAR para confirmar.' });
+  const subscription = await cancellation.requestCancellation({ organizationId: req.accessUser.organizationId,
+    mode: 'period_end', requestedBy: `user:${req.accessUser.id}`, reason: String(req.body?.reason || '').trim() });
+  return res.status(200).json({ ok: true, subscription });
+}));
+
 router.patch('/api/supervisor/branding', requireSupervisor, async (req, res) => {
   try { return res.status(200).json({ ok: true, organization: await service.updateOrganizationBranding(req.accessUser.organizationId, req.body) }); }
   catch (error) { return sendError(res, error); }

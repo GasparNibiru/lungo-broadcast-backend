@@ -14,6 +14,12 @@ async function current(organizationId) {
   return data;
 }
 
+async function isOrganizationOwner(organizationId, userId) {
+  const { data, error } = await supabase.from('organizations').select('owner_user_id').eq('id', organizationId).maybeSingle();
+  if (error) throw new CancellationError('Não foi possível validar o titular da assinatura.', 500);
+  return data?.owner_user_id === userId;
+}
+
 async function requestCancellation({ organizationId, mode, requestedBy, reason }) {
   const subscription = await current(organizationId);
   if (!subscription) throw new CancellationError('Assinatura ativa não encontrada.', 404);
@@ -29,4 +35,4 @@ async function requestCancellation({ organizationId, mode, requestedBy, reason }
   return data;
 }
 
-module.exports = { CancellationError, current, requestCancellation };
+module.exports = { CancellationError, current, isOrganizationOwner, requestCancellation };
