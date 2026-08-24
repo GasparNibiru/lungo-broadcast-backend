@@ -61,15 +61,20 @@ async function importMetaLead(value) {
   const fields = metaFields(data);
   const firstName = firstMetaField(fields, ['first_name','primeiro_nome']);
   const lastName = firstMetaField(fields, ['last_name','sobrenome']);
-  const name = firstMetaField(fields, ['full_name','nome_completo','name','nome']) || [firstName, lastName].filter(Boolean).join(' ') || firstMetaField(fields, [], ['nome','name']);
-  const phone = firstMetaField(fields, ['phone_number','numero_de_telefone','telefone','whatsapp','celular'], ['phone','telefone','whatsapp','celular']).replace(/\D/g, '');
-  if (!name || phone.length < 8) {
+  const rawName = firstMetaField(fields, ['full_name','nome_completo','name','nome']) || [firstName, lastName].filter(Boolean).join(' ') || firstMetaField(fields, [], ['nome','name']);
+  const rawPhone = firstMetaField(fields, ['phone_number','numero_de_telefone','numero_do_whatsapp','telefone','whatsapp','celular'], ['phone','telefone','whatsapp','celular']);
+  const phoneDigits = rawPhone.replace(/\D/g, '');
+  const validContact = Boolean(rawName) && phoneDigits.length >= 8;
+  if (!validContact) {
     console.warn('[META LEAD ADS] Campos recebidos sem dados pessoais:', Object.keys(fields).join(', ') || 'nenhum');
-    throw new Error(`Lead Meta ${leadId} sem nome ou telefone valido.`);
+    console.warn(`[META LEAD ADS] Lead Meta ${leadId} importado como invalido por nao conter nome ou telefone real.`);
   }
+  const name = rawName || 'Lead de teste Meta';
+  const phone = validContact ? phoneDigits : `meta-${leadId}`;
   const profileValue = firstMetaField(fields, ['profile','perfil','tipo_de_contratacao','tipo']).toLowerCase();
   const profile = profileValue.includes('pj') || profileValue.includes('empresa') ? 'PJ' : profileValue.includes('ades') ? 'Adesao' : 'PF';
-  const lives = Math.max(0, Number(firstMetaField(fields, ['lives_count','quantidade_de_vidas','qtd_de_vidas','vidas'])) || 0);
+  const livesAnswer = firstMetaField(fields, ['lives_count','quantidade_de_vidas','qtd_de_vidas','vidas'], ['quantas_pessoas','quantidade_de_pessoas','vidas']);
+  const lives = Math.max(0, Number(String(livesAnswer).match(/\d+/)?.[0] || 0));
   const settingsResult = await supabase.from('lead_marketplace_settings').select('min_price,max_price').eq('id', true).single();
   if (settingsResult.error) throw settingsResult.error;
   const low = Number(settingsResult.data.min_price || 0); const high = Number(settingsResult.data.max_price || low);
@@ -85,7 +90,8 @@ async function importMetaLead(value) {
     state: firstMetaField(fields, ['state','estado','uf']).slice(0, 2).toUpperCase() || null,
     campaign_name: ad.campaignName || 'Meta Lead Ads', ad_name: ad.adName || null,
     meta_page_id: String(value?.page_id || '') || null, meta_form_id: String(data?.form_id || value?.form_id || '') || null,
-    meta_ad_id: adId || null, original_price: originalPrice, price: originalPrice, received_at: receivedAt
+    meta_ad_id: adId || null, original_price: originalPrice, price: originalPrice, received_at: receivedAt,
+    status: validContact ? 'available' : 'invalid'
   };
   const inserted = await supabase.from('marketplace_leads').insert(payload).select().single();
   if (inserted.error?.code === '23505') return (await supabase.from('marketplace_leads').select('id').eq('external_id', leadId).single()).data;
