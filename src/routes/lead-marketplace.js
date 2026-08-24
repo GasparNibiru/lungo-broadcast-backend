@@ -49,6 +49,11 @@ function metaLivesAndAges(fields) {
   const lives = explicitCount ? Number(explicitCount) : ages.length;
   return { answer: String(answer).trim().slice(0, 500), lives: Math.max(0, Math.min(999, lives)) };
 }
+function metaProductInterest(fields) {
+  return firstMetaField(fields,
+    ['product_interest','plano_de_interesse','operadora','interesse'],
+    ['qual_plano','plano_de_saude','operadora','plano_interesse']).slice(0, 500) || null;
+}
 async function fetchMetaLead(leadId, token, version) {
   const { data } = await axios.get(`https://graph.facebook.com/${version}/${encodeURIComponent(leadId)}`, {
     params: { fields: META_FIELDS, access_token: token }, timeout: 15000
@@ -101,7 +106,7 @@ async function importMetaLead(value) {
     external_id: leadId, name, phone,
     email: firstMetaField(fields, ['email','e_mail'], ['email']) || null, profile, lives_count: qualification.lives,
     beneficiary_ages: qualification.answer,
-    product_interest: firstMetaField(fields, ['product_interest','plano_de_interesse','operadora','interesse']) || null,
+    product_interest: metaProductInterest(fields),
     city: firstMetaField(fields, ['city','cidade']) || null,
     state: firstMetaField(fields, ['state','estado','uf']).slice(0, 2).toUpperCase() || null,
     campaign_name: ad.campaignName || 'Meta Lead Ads', ad_name: ad.adName || null,
@@ -159,19 +164,23 @@ router.post('/api/admin/lead-marketplace/meta/backfill', requireAdmin, async (_r
   if (!token || !/^v\d+\.\d+$/.test(version)) return res.status(409).json({ ok: false, error: 'Integracao Meta incompleta no servidor.' });
   try {
     const result = await supabase.from('marketplace_leads').select('id,external_id')
-      .not('external_id', 'is', null).is('beneficiary_ages', null).order('received_at', { ascending: false }).limit(25);
+      .not('external_id', 'is', null).order('received_at', { ascending: false }).limit(25);
     if (result.error) throw result.error;
     let updated = 0; let skipped = 0; let failed = 0;
     for (const lead of result.data || []) {
       try {
         const data = await fetchMetaLead(lead.external_id, token, version);
-        const qualification = metaLivesAndAges(metaFields(data));
-        if (!qualification.answer) { skipped += 1; continue; }
-        const saved = await supabase.from('marketplace_leads').update({
-          beneficiary_ages: qualification.answer,
-          lives_count: qualification.lives,
-          updated_at: new Date().toISOString()
-        }).eq('id', lead.id);
+        const fields = metaFields(data);
+        const qualification = metaLivesAndAges(fields);
+        const productInterest = metaProductInterest(fields);
+        if (!qualification.answer && !productInterest) { skipped += 1; continue; }
+        const changes = { updated_at: new Date().toISOString() };
+        if (qualification.answer) {
+          changes.beneficiary_ages = qualification.answer;
+          changes.lives_count = qualification.lives;
+        }
+        if (productInterest) changes.product_interest = productInterest;
+        const saved = await supabase.from('marketplace_leads').update(changes).eq('id', lead.id);
         if (saved.error) throw saved.error;
         updated += 1;
       } catch (error) {
