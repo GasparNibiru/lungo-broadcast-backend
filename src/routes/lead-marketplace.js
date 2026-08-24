@@ -16,6 +16,7 @@ function effectivePrice(item, minimum) {
   const original = Number(item.original_price ?? item.price ?? 0);
   const received = Date.parse(item.received_at || item.created_at || new Date().toISOString());
   const hours = Math.max(0, Math.floor((Date.now() - received) / 3600000));
+  if (hours >= 48) return 6.99;
   return money(Math.max(Number(minimum || 0), original * Math.max(0, 1 - hours * 0.10)));
 }
 function metaSignatureValid(req) {
@@ -120,8 +121,8 @@ async function importMetaLead(value) {
   return inserted.data;
 }
 function fail(res, error, fallback = 'Erro no marketplace de leads.') { console.error('[LEAD MARKETPLACE]', error?.message || error); const message = String(error?.message || ''); const known = ['Saldo insuficiente.', 'Este lead nao esta mais disponivel.', 'Usuario invalido ou inativo.', 'Usuario invalido.', 'O ajuste deixaria o saldo negativo.'].find((item) => message.includes(item)); return res.status(known ? 409 : 500).json({ ok: false, error: known || fallback }); }
-function maskedName(value) { const text = String(value || '').trim(); return text ? `${text.slice(0, Math.min(3, text.length))}${'*'.repeat(Math.max(3, text.length - 3))}` : '***'; }
-function maskedPhone(value) { const digits = String(value || '').replace(/\D/g, ''); return digits.length >= 4 ? `${digits.slice(0, 2)} ${'*'.repeat(Math.max(5, digits.length - 4))}${digits.slice(-2)}` : '********'; }
+function maskedName(value) { const text = String(value || '').trim(); const visible = Math.min(5, text.length); return text ? `${text.slice(0, visible)}${'*'.repeat(Math.max(3, text.length - visible))}` : '*****'; }
+function maskedPhone(value) { const digits = String(value || '').replace(/\D/g, ''); if (digits.startsWith('55') && digits.length >= 12) return `55 (${digits.slice(2, 4)}) ${'*'.repeat(Math.max(5, digits.length - 6))}${digits.slice(-2)}`; return digits.length >= 4 ? `(${digits.slice(0, 2)}) ${'*'.repeat(Math.max(5, digits.length - 4))}${digits.slice(-2)}` : '(**) *****'; }
 function publicOffer(item, minimum) { return { id: item.id, name: maskedName(item.name), phone: maskedPhone(item.phone), profile: item.profile, livesCount: Number(item.lives_count || 0), beneficiaryAges: item.beneficiary_ages, productInterest: item.product_interest, city: item.city, state: item.state, price: effectivePrice(item, minimum), originalPrice: Number(item.original_price ?? item.price), status: item.status === 'reserved' ? 'reserved' : 'available', capturedAt: item.received_at || item.created_at }; }
 async function addLegacyLead(user, token, offer) { const client = await legacyBrokerAccess.ensure(user, token); const file = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json'); let items = []; try { const parsed = JSON.parse(await fs.readFile(file, 'utf8')); items = Array.isArray(parsed) ? parsed : []; } catch (error) { if (error.code !== 'ENOENT') throw error; } if (!items.some((item) => item.marketplaceLeadId === offer.id)) { const now = new Date().toISOString(); items.push({ id: crypto.randomUUID(), marketplaceLeadId: offer.id, instanceName: client.instanceName, nome: offer.name, telefone: offer.phone, email: offer.email || '', pessoaTipo: offer.profile, qtdVidas: Number(offer.lives_count || 0), planoInteresse: offer.product_interest || '', cidade: offer.city || '', status: 'novo', origem: 'Marketplace de Leads', observacao: `Lead adquirido no marketplace interno.${offer.beneficiary_ages ? `\nIdades dos beneficiários: ${offer.beneficiary_ages}` : ''}`, createdAt: now, updatedAt: now }); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, `${JSON.stringify(items, null, 2)}\n`, 'utf8'); } }
 
