@@ -39,7 +39,7 @@ function firstMetaField(fields, names, fragments = []) {
 }
 function metaLivesAndAges(fields) {
   const answer = firstMetaField(fields,
-    ['beneficiary_ages','idades_dos_beneficiarios','idades','lives_count','quantidade_de_vidas','qtd_de_vidas','vidas'],
+    ['quantas_pessoas_entrarao_no_plano_e_quais_sao_as_idades','beneficiary_ages','idades_dos_beneficiarios','idades','lives_count','quantidade_de_vidas','qtd_de_vidas','vidas'],
     ['quantas_pessoas','quantidade_de_pessoas','idades','idade_dos_beneficiarios']);
   if (!answer) return { answer: null, lives: 0 };
   const normalized = normalizeMetaKey(answer);
@@ -51,7 +51,7 @@ function metaLivesAndAges(fields) {
 }
 function metaProductInterest(fields) {
   return firstMetaField(fields,
-    ['product_interest','plano_de_interesse','operadora','interesse'],
+    ['o_beneficiario_possui_plano_de_saude_ativo_e_quer_trocar_se_sim_qual_plano','product_interest','plano_de_interesse','operadora','interesse'],
     ['qual_plano','plano_de_saude','operadora','plano_interesse']).slice(0, 500) || null;
 }
 async function fetchMetaLead(leadId, token, version) {
