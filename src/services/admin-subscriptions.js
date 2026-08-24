@@ -2,6 +2,7 @@ const supabase = require('../database/supabase');
 const tokenVault = require('./access-token-vault');
 const { generateToken, hashToken, releaseArchivedEmail } = require('./admin-accesses');
 const { sendAccessEmail } = require('./access-email');
+const asaas = require('./asaas');
 
 const DUPLICATE_CODE = '23505';
 const PLAN_NOT_FOUND_CODE = 'P0002';
@@ -68,6 +69,7 @@ async function createAdminSubscription(input) {
       // Return it once to the Admin instead of inviting a duplicate sale retry.
       console.error('[ADMIN SUBSCRIPTION TOKEN VAULT ERROR]', vaultError.message || vaultError);
     }
+    const billing = await asaas.provisionSubscription(data, input);
     let emailDelivery;
     try {
       emailDelivery = await sendAccessEmail({
@@ -75,16 +77,17 @@ async function createAdminSubscription(input) {
         name: input.responsibleName,
         organizationName: input.organizationName,
         planName: data?.subscription?.plan_name || input.planCode,
-        token
+        token,
+        paymentUrl: billing.invoiceUrl || null
       });
     } catch (emailError) {
       // The sale and access are already committed. Never retry the transaction because email failed.
       console.error('[ADMIN ACCESS EMAIL ERROR]', emailError.message || emailError);
       emailDelivery = { sent: false, recipient: input.email };
     }
-    return { ...data, token, emailDelivery };
+    return { ...data, token, emailDelivery, billing };
   }
-  return data;
+  return { ...data, billing: await asaas.provisionSubscription(data, input) };
 }
 
 module.exports = { AdminSubscriptionError, createAdminSubscription };

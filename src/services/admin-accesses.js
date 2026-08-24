@@ -41,11 +41,27 @@ function archivedEmail(userId) {
 async function releaseArchivedEmail(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return false;
-  const { data, error } = await supabase.from('users').select('id').eq('email', normalized).eq('status', 'inactive').maybeSingle();
+  const { data, error } = await supabase.from('users')
+    .select('id, organization_id')
+    .eq('email', normalized)
+    .limit(1)
+    .maybeSingle();
   if (error) throw databaseError('find archived email', error);
   if (!data) return false;
-  const { error: updateError } = await supabase.from('users').update({ email: archivedEmail(data.id) }).eq('id', data.id).eq('status', 'inactive');
+  const { data: organization, error: organizationError } = await supabase.from('organizations')
+    .select('status')
+    .eq('id', data.organization_id)
+    .maybeSingle();
+  if (organizationError) throw databaseError('find archived email organization', organizationError);
+  if (organization?.status !== 'inactive') return false;
+  const { error: updateError } = await supabase.from('users').update({ status: 'inactive', email: archivedEmail(data.id) }).eq('id', data.id);
   if (updateError) throw databaseError('release archived email', updateError);
+  const { error: tokenError } = await supabase.from('access_tokens')
+    .update({ status: 'revoked', revoked_at: new Date().toISOString() })
+    .eq('user_id', data.id)
+    .eq('status', 'active');
+  if (tokenError) throw databaseError('revoke archived email token', tokenError);
+  await tokenVault.remove(data.id);
   return true;
 }
 

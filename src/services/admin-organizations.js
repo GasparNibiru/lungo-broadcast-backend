@@ -20,6 +20,11 @@ const ORGANIZATIONS_SELECT = `
     due_mode,
     fixed_due_day,
     legacy,
+    cancellation_status,
+    cancellation_requested_at,
+    cancellation_effective_at,
+    cancellation_requested_by,
+    cancellation_reason,
     created_at,
     plans (
       code,
@@ -84,7 +89,12 @@ function mapOrganization(organization) {
       next_due_date: subscription.next_due_date,
       due_mode: subscription.due_mode,
       fixed_due_day: subscription.fixed_due_day,
-      legacy: subscription.legacy
+      legacy: subscription.legacy,
+      cancellation_status: subscription.cancellation_status,
+      cancellation_requested_at: subscription.cancellation_requested_at,
+      cancellation_effective_at: subscription.cancellation_effective_at,
+      cancellation_requested_by: subscription.cancellation_requested_by,
+      cancellation_reason: subscription.cancellation_reason
     } : null,
     latest_payment: payment ? {
       payment_id: payment.id,

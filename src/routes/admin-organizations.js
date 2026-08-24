@@ -6,6 +6,7 @@ const {
   updateAdminOrganization,
   changeAdminOrganizationSubscriptionStatus
 } = require('../services/admin-organizations');
+const cancellation = require('../services/subscription-cancellation');
 
 const router = express.Router();
 const ALLOWED_FIELDS = new Set([
@@ -48,6 +49,7 @@ function validateUpdate(body) {
   if (has('organizationType') && !ORGANIZATION_TYPES.has(body.organizationType)) errors.push('organizationType deve ser individual ou brokerage.');
   if (has('planCode') && (typeof body.planCode !== 'string' || !body.planCode.trim())) errors.push('planCode deve ser um texto não vazio.');
   if (has('extraAccesses') && (!Number.isInteger(body.extraAccesses) || body.extraAccesses < 0)) errors.push('extraAccesses deve ser um número inteiro maior ou igual a zero.');
+  if (body.planCode === 'individual' && body.extraAccesses !== 0) errors.push('O Plano Individual não aceita acessos extras.');
   if (has('legacy') && typeof body.legacy !== 'boolean') errors.push('legacy deve ser booleano.');
   if (has('nextDueDate') && !isIsoDate(body.nextDueDate)) errors.push('nextDueDate deve ser uma data válida no formato YYYY-MM-DD.');
   if (has('dueMode') && !DUE_MODES.has(body.dueMode)) errors.push('dueMode deve ser thirty_days ou fixed_day.');
@@ -117,6 +119,16 @@ function organizationStatusAction(action) {
 
 router.post('/api/admin/organizations/:organizationId/suspend', requireAdmin, requireOrganizationId, organizationStatusAction('suspend'));
 router.post('/api/admin/organizations/:organizationId/reactivate', requireAdmin, requireOrganizationId, organizationStatusAction('reactivate'));
-router.post('/api/admin/organizations/:organizationId/cancel', requireAdmin, requireOrganizationId, organizationStatusAction('cancel'));
+router.post('/api/admin/organizations/:organizationId/cancel', requireAdmin, requireOrganizationId, async (req, res) => {
+  const mode = req.body?.mode === 'period_end' ? 'period_end' : 'immediate';
+  try {
+    const subscription = await cancellation.requestCancellation({ organizationId: req.params.organizationId, mode,
+      requestedBy: 'admin', reason: String(req.body?.reason || '').trim() });
+    return res.status(200).json({ ok: true, subscription });
+  } catch (error) {
+    const statusCode = [400, 404, 409, 502].includes(error.statusCode) ? error.statusCode : 500;
+    return res.status(statusCode).json({ ok: false, error: error.message || 'Não foi possível cancelar a assinatura.' });
+  }
+});
 
 module.exports = router;

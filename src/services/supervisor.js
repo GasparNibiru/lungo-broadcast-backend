@@ -76,6 +76,43 @@ async function createSupervisorBroker(organizationId, input) {
   }
 }
 
+async function updateOrganizationBranding(organizationId, input) {
+  const name = String(input?.name || '').trim().slice(0, 160);
+  const logoUrl = String(input?.logo || '').trim();
+  const sidebarColor = String(input?.sidebarColor || '').trim();
+  const background = String(input?.background || 'none').trim();
+  if (name.length < 2) { const error = new Error('Informe o nome da corretora.'); error.statusCode = 400; throw error; }
+  if (logoUrl && !logoUrl.startsWith('data:image/') && !/^https:\/\//i.test(logoUrl)) { const error = new Error('Logo inválida.'); error.statusCode = 400; throw error; }
+  if (logoUrl.length > 1800000) { const error = new Error('Use uma logo menor.'); error.statusCode = 400; throw error; }
+  if (sidebarColor && !/^#[0-9a-f]{6}$/i.test(sidebarColor)) { const error = new Error('Cor da sidebar invalida.'); error.statusCode = 400; throw error; }
+  if (!['none', 'mountain-lake', 'misty-forest', 'tropical-beach', 'green-hills', 'night-city'].includes(background)) { const error = new Error('Imagem de fundo invalida.'); error.statusCode = 400; throw error; }
+  const { data, error } = await supabase.from('organizations').update({
+    name, logo_url: logoUrl || null, sidebar_color: sidebarColor || null, background_key: background
+  }).eq('id', organizationId).select('id,name,logo_url,sidebar_color,background_key').single();
+  if (error) throw databaseError('update organization branding', error);
+  return { id: data.id, name: data.name, logoUrl: data.logo_url || '', sidebarColor: data.sidebar_color || '', background: data.background_key || 'none' };
+}
+
+async function updateOwnProfile(userId, input) {
+  const cleanName = String(input?.name || '').trim().slice(0, 120);
+  const photo = String(input?.photo || '').trim();
+  const sidebarColor = String(input?.sidebarColor || '').trim();
+  const background = String(input?.background || 'none').trim();
+  const theme = String(input?.theme || '').trim();
+  if (cleanName.length < 2) { const error = new Error('Informe seu nome.'); error.statusCode = 400; throw error; }
+  if (photo && !photo.startsWith('data:image/') && !/^https:\/\//i.test(photo)) { const error = new Error('Foto invalida.'); error.statusCode = 400; throw error; }
+  if (photo.length > 1800000) { const error = new Error('Use uma foto menor.'); error.statusCode = 400; throw error; }
+  if (sidebarColor && !/^#[0-9a-f]{6}$/i.test(sidebarColor)) { const error = new Error('Cor da sidebar invalida.'); error.statusCode = 400; throw error; }
+  if (!['none', 'mountain-lake', 'misty-forest', 'tropical-beach', 'green-hills', 'night-city'].includes(background)) { const error = new Error('Imagem de fundo invalida.'); error.statusCode = 400; throw error; }
+  if (theme && !['dark', 'light'].includes(theme)) { const error = new Error('Tema invalido.'); error.statusCode = 400; throw error; }
+  const { data, error } = await supabase.from('users').update({
+    name: cleanName, profile_photo_url: photo || null, sidebar_color: sidebarColor || null,
+    background_key: background, preferred_theme: theme || null
+  }).eq('id', userId).select('id,name,profile_photo_url,sidebar_color,background_key,preferred_theme').single();
+  if (error) throw databaseError('update own profile', error);
+  return { id: data.id, name: data.name, profilePhotoUrl: data.profile_photo_url || '', sidebarColor: data.sidebar_color || '', background: data.background_key || 'none', theme: data.preferred_theme || '' };
+}
+
 async function resendSupervisorBrokerEmail(organizationId, userId) {
   await organizationBroker(organizationId, userId);
   return resendAdminAccessEmail(userId);
@@ -153,17 +190,10 @@ async function assignSupervisorLead(organizationId, leadId, brokerUserId, superv
     throw error;
   }
   const token = await tokenVault.get(broker.id);
-  if (!token) {
-    const error = new Error('O token do corretor não está disponível. Renove o token antes de enviar o lead.');
-    error.statusCode = 409;
-    throw error;
-  }
-  await legacyBrokerAccess.ensure({
-    id: broker.id,
-    name: broker.name,
-    email: broker.email,
-    phone: broker.phone,
-    organizationId
+  // O login usa o hash no Supabase. A cópia legível é apenas auxiliar e pode
+  // não acompanhar uma promoção entre volumes de staging e produção.
+  if (token) await legacyBrokerAccess.ensure({
+    id: broker.id, name: broker.name, email: broker.email, phone: broker.phone, organizationId
   }, token);
   return legacyBrokerAccess.assignOrganizationLead(organizationId, leadId, broker.id, supervisorUserId);
 }
@@ -180,4 +210,4 @@ async function listSupervisorOperationalCustomers(organizationId, supervisorUser
   catch (error) { throw databaseError('list operational customers', error); }
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };
+module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateOrganizationBranding, updateOwnProfile, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };

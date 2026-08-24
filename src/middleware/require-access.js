@@ -19,7 +19,7 @@ function requireAccess(roles = []) {
 
     const { data, error } = await supabase
       .from('access_tokens')
-      .select('id, user_id, status, expires_at, users!inner(id, organization_id, role, name, email, phone, status, organizations!users_organization_id_fkey(id, name, status))')
+      .select('id, user_id, status, expires_at, users!inner(id, organization_id, role, name, email, phone, status, profile_photo_url, sidebar_color, background_key, preferred_theme, organizations!users_organization_id_fkey(id, name, logo_url, sidebar_color, background_key, status))')
       .eq('token_hash', hashToken(token))
       .eq('status', 'active')
       .maybeSingle();
@@ -36,7 +36,19 @@ function requireAccess(roles = []) {
     }
     if (allowed.size && !allowed.has(user.role)) return res.status(403).json({ ok: false, error: 'Perfil sem permissão para esta operação.' });
 
-    req.accessUser = { id: user.id, organizationId: user.organization_id, role: user.role, name: user.name, email: user.email, phone: user.phone, organization: user.organizations };
+    const finalized = await supabase.rpc('finalize_due_subscription_cancellation', { p_organization_id: user.organization_id });
+    if (!finalized.error && finalized.data === true) return res.status(401).json({ ok: false, error: 'Assinatura encerrada ao final do período contratado.' });
+
+    req.accessUser = {
+      id: user.id, organizationId: user.organization_id, role: user.role, name: user.name,
+      email: user.email, phone: user.phone, profilePhotoUrl: user.profile_photo_url || '',
+      sidebarColor: user.sidebar_color || '', background: user.background_key || '', theme: user.preferred_theme || '',
+      organization: user.organizations ? {
+        id: user.organizations.id, name: user.organizations.name, logoUrl: user.organizations.logo_url || '',
+        sidebarColor: user.organizations.sidebar_color || '', background: user.organizations.background_key || 'none',
+        status: user.organizations.status
+      } : null
+    };
     req.accessToken = token;
     Promise.all([
       supabase.from('access_tokens').update({ last_used_at: new Date().toISOString() }).eq('id', data.id),

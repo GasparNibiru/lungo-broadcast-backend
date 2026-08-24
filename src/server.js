@@ -21,12 +21,16 @@ const adminAccessesRouter = require('./routes/admin-accesses');
 const adminPaymentsRouter = require('./routes/admin-payments');
 const supervisorRouter = require('./routes/supervisor');
 const trainingsRouter = require('./routes/trainings');
+const trainingCenterRouter = require('./routes/trainings-v2');
 const teamMessagesRouter = require('./routes/team-messages');
 const recruitmentRouter = require('./routes/recruitment');
 const termsAcceptanceRouter = require('./routes/terms-acceptance');
 const calendarRouter = require('./routes/calendar');
 const leadMarketplaceRouter = require('./routes/lead-marketplace');
 const teamGoalsRouter = require('./routes/team-goals');
+const campaignMediaRouter = require('./routes/campaign-media');
+const asaasWebhooksRouter = require('./routes/asaas-webhooks');
+const publicCheckoutRouter = require('./routes/public-checkout');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -49,7 +53,7 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({ origin: true, credentials: false }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '5mb', verify(req, _res, buffer) { req.rawBody = Buffer.from(buffer); } }));
 app.use(express.urlencoded({ extended: true }));
 app.use(databaseHealthRouter);
 app.use(adminSubscriptionsRouter);
@@ -62,12 +66,16 @@ app.use(adminAccessesRouter);
 app.use(adminPaymentsRouter);
 app.use(supervisorRouter);
 app.use(trainingsRouter);
+app.use(trainingCenterRouter);
 app.use(teamMessagesRouter);
 app.use(recruitmentRouter);
 app.use(termsAcceptanceRouter);
 app.use(calendarRouter);
 app.use(leadMarketplaceRouter);
 app.use(teamGoalsRouter);
+app.use(campaignMediaRouter);
+app.use(asaasWebhooksRouter);
+app.use(publicCheckoutRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
