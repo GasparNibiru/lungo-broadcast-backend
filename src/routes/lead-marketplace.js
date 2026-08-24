@@ -37,6 +37,24 @@ function firstMetaField(fields, names, fragments = []) {
   const entry = Object.entries(fields).find(([key, value]) => value && fragments.some((fragment) => key.includes(fragment)));
   return entry?.[1] || '';
 }
+function metaLivesAndAges(fields) {
+  const answer = firstMetaField(fields,
+    ['beneficiary_ages','idades_dos_beneficiarios','idades','lives_count','quantidade_de_vidas','qtd_de_vidas','vidas'],
+    ['quantas_pessoas','quantidade_de_pessoas','idades','idade_dos_beneficiarios']);
+  if (!answer) return { answer: null, lives: 0 };
+  const normalized = normalizeMetaKey(answer);
+  const explicitCount = normalized.match(/(?:^|_)(\d{1,3})_(?:pessoas?|vidas?|beneficiarios?)(?:_|$)/)?.[1];
+  const numbers = [...String(answer).matchAll(/\b(\d{1,3})\b/g)].map((match) => Number(match[1]));
+  const ages = numbers.filter((number) => number >= 0 && number <= 120);
+  const lives = explicitCount ? Number(explicitCount) : ages.length;
+  return { answer: String(answer).trim().slice(0, 500), lives: Math.max(0, Math.min(999, lives)) };
+}
+async function fetchMetaLead(leadId, token, version) {
+  const { data } = await axios.get(`https://graph.facebook.com/${version}/${encodeURIComponent(leadId)}`, {
+    params: { fields: META_FIELDS, access_token: token }, timeout: 15000
+  });
+  return data;
+}
 async function metaAdDetails(adId, token, version) {
   if (!adId) return {};
   try {
@@ -55,9 +73,7 @@ async function importMetaLead(value) {
   const existing = await supabase.from('marketplace_leads').select('id').eq('external_id', leadId).maybeSingle();
   if (existing.error) throw existing.error;
   if (existing.data) return existing.data;
-  const { data } = await axios.get(`https://graph.facebook.com/${version}/${encodeURIComponent(leadId)}`, {
-    params: { fields: META_FIELDS, access_token: token }, timeout: 15000
-  });
+  const data = await fetchMetaLead(leadId, token, version);
   const fields = metaFields(data);
   const firstName = firstMetaField(fields, ['first_name','primeiro_nome']);
   const lastName = firstMetaField(fields, ['last_name','sobrenome']);
@@ -73,8 +89,7 @@ async function importMetaLead(value) {
   const phone = validContact ? phoneDigits : `meta-${leadId}`;
   const profileValue = firstMetaField(fields, ['profile','perfil','tipo_de_contratacao','tipo']).toLowerCase();
   const profile = profileValue.includes('pj') || profileValue.includes('empresa') ? 'PJ' : profileValue.includes('ades') ? 'Adesao' : 'PF';
-  const livesAnswer = firstMetaField(fields, ['lives_count','quantidade_de_vidas','qtd_de_vidas','vidas'], ['quantas_pessoas','quantidade_de_pessoas','vidas']);
-  const lives = Math.max(0, Number(String(livesAnswer).match(/\d+/)?.[0] || 0));
+  const qualification = metaLivesAndAges(fields);
   const settingsResult = await supabase.from('lead_marketplace_settings').select('min_price,max_price').eq('id', true).single();
   if (settingsResult.error) throw settingsResult.error;
   const low = Number(settingsResult.data.min_price || 0); const high = Number(settingsResult.data.max_price || low);
@@ -84,7 +99,8 @@ async function importMetaLead(value) {
   const receivedAt = new Date().toISOString();
   const payload = {
     external_id: leadId, name, phone,
-    email: firstMetaField(fields, ['email','e_mail'], ['email']) || null, profile, lives_count: lives,
+    email: firstMetaField(fields, ['email','e_mail'], ['email']) || null, profile, lives_count: qualification.lives,
+    beneficiary_ages: qualification.answer,
     product_interest: firstMetaField(fields, ['product_interest','plano_de_interesse','operadora','interesse']) || null,
     city: firstMetaField(fields, ['city','cidade']) || null,
     state: firstMetaField(fields, ['state','estado','uf']).slice(0, 2).toUpperCase() || null,
@@ -102,7 +118,7 @@ function fail(res, error, fallback = 'Erro no marketplace de leads.') { console.
 function maskedName(value) { const text = String(value || '').trim(); return text ? `${text.slice(0, Math.min(3, text.length))}${'*'.repeat(Math.max(3, text.length - 3))}` : '***'; }
 function maskedPhone(value) { const digits = String(value || '').replace(/\D/g, ''); return digits.length >= 4 ? `${digits.slice(0, 2)} ${'*'.repeat(Math.max(5, digits.length - 4))}${digits.slice(-2)}` : '********'; }
 function publicOffer(item, minimum) { return { id: item.id, name: maskedName(item.name), phone: maskedPhone(item.phone), profile: item.profile, livesCount: Number(item.lives_count || 0), productInterest: item.product_interest, city: item.city, state: item.state, price: effectivePrice(item, minimum), originalPrice: Number(item.original_price ?? item.price), status: item.status === 'reserved' ? 'reserved' : 'available', capturedAt: item.received_at || item.created_at }; }
-async function addLegacyLead(user, token, offer) { const client = await legacyBrokerAccess.ensure(user, token); const file = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json'); let items = []; try { const parsed = JSON.parse(await fs.readFile(file, 'utf8')); items = Array.isArray(parsed) ? parsed : []; } catch (error) { if (error.code !== 'ENOENT') throw error; } if (!items.some((item) => item.marketplaceLeadId === offer.id)) { const now = new Date().toISOString(); items.push({ id: crypto.randomUUID(), marketplaceLeadId: offer.id, instanceName: client.instanceName, nome: offer.name, telefone: offer.phone, email: offer.email || '', pessoaTipo: offer.profile, qtdVidas: Number(offer.lives_count || 0), planoInteresse: offer.product_interest || '', cidade: offer.city || '', status: 'novo', origem: 'Marketplace de Leads', observacao: 'Lead adquirido no marketplace interno.', createdAt: now, updatedAt: now }); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, `${JSON.stringify(items, null, 2)}\n`, 'utf8'); } }
+async function addLegacyLead(user, token, offer) { const client = await legacyBrokerAccess.ensure(user, token); const file = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json'); let items = []; try { const parsed = JSON.parse(await fs.readFile(file, 'utf8')); items = Array.isArray(parsed) ? parsed : []; } catch (error) { if (error.code !== 'ENOENT') throw error; } if (!items.some((item) => item.marketplaceLeadId === offer.id)) { const now = new Date().toISOString(); items.push({ id: crypto.randomUUID(), marketplaceLeadId: offer.id, instanceName: client.instanceName, nome: offer.name, telefone: offer.phone, email: offer.email || '', pessoaTipo: offer.profile, qtdVidas: Number(offer.lives_count || 0), planoInteresse: offer.product_interest || '', cidade: offer.city || '', status: 'novo', origem: 'Marketplace de Leads', observacao: `Lead adquirido no marketplace interno.${offer.beneficiary_ages ? `\nIdades dos beneficiários: ${offer.beneficiary_ages}` : ''}`, createdAt: now, updatedAt: now }); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, `${JSON.stringify(items, null, 2)}\n`, 'utf8'); } }
 
 router.get('/api/integrations/meta/lead-ads/webhook', (req, res) => {
   const expected = String(process.env.META_WEBHOOK_VERIFY_TOKEN || '');
@@ -137,6 +153,36 @@ router.get('/api/admin/lead-marketplace', requireAdmin, async (_req, res) => {
   } catch (error) { fail(res, error, 'Estrutura do marketplace ainda nao foi aplicada no Supabase.'); }
 });
 
+router.post('/api/admin/lead-marketplace/meta/backfill', requireAdmin, async (_req, res) => {
+  const token = String(process.env.META_PAGE_ACCESS_TOKEN || '').trim();
+  const version = String(process.env.META_GRAPH_API_VERSION || '').trim();
+  if (!token || !/^v\d+\.\d+$/.test(version)) return res.status(409).json({ ok: false, error: 'Integracao Meta incompleta no servidor.' });
+  try {
+    const result = await supabase.from('marketplace_leads').select('id,external_id')
+      .not('external_id', 'is', null).is('beneficiary_ages', null).order('received_at', { ascending: false }).limit(25);
+    if (result.error) throw result.error;
+    let updated = 0; let skipped = 0; let failed = 0;
+    for (const lead of result.data || []) {
+      try {
+        const data = await fetchMetaLead(lead.external_id, token, version);
+        const qualification = metaLivesAndAges(metaFields(data));
+        if (!qualification.answer) { skipped += 1; continue; }
+        const saved = await supabase.from('marketplace_leads').update({
+          beneficiary_ages: qualification.answer,
+          lives_count: qualification.lives,
+          updated_at: new Date().toISOString()
+        }).eq('id', lead.id);
+        if (saved.error) throw saved.error;
+        updated += 1;
+      } catch (error) {
+        failed += 1;
+        console.error('[META LEAD ADS BACKFILL]', lead.external_id, error?.response?.data?.error?.message || error.message || error);
+      }
+    }
+    return res.json({ ok: true, updated, skipped, failed });
+  } catch (error) { return fail(res, error, 'Nao foi possivel reprocessar os leads da Meta.'); }
+});
+
 router.patch('/api/admin/lead-marketplace/settings', requireAdmin, async (req, res) => {
   const min = money(req.body?.minPrice); const max = money(req.body?.maxPrice); if (min < 0 || max < min) return res.status(400).json({ ok: false, error: 'Faixa de preco invalida.' });
   const payload = { min_price: min, max_price: max, support_whatsapp: String(req.body?.supportWhatsapp || '5555992102864').replace(/\D/g, ''), reservation_minutes: Math.max(1, Math.min(30, Number(req.body?.reservationMinutes || 2))), updated_at: new Date().toISOString() };
@@ -159,7 +205,7 @@ router.get('/api/lead-marketplace', requireAccess(['broker','supervisor']), asyn
   try { const [wallet, settings, offers] = await Promise.all([supabase.from('lead_credit_wallets').select('balance').eq('user_id', req.accessUser.id).maybeSingle(), supabase.from('lead_marketplace_settings').select('support_whatsapp,min_price').eq('id', true).single(), supabase.from('marketplace_leads').select('*').in('status', ['available','reserved']).order('received_at', { ascending: false })]); const error = wallet.error || settings.error || offers.error; if (error) throw error; const now = Date.now(); const visible = (offers.data || []).filter((item) => item.status === 'available' || Date.parse(item.reserved_until || 0) <= now || item.reserved_by === req.accessUser.id).map((item) => publicOffer(item, settings.data.min_price)); res.json({ ok: true, balance: Number(wallet.data?.balance || 0), supportWhatsapp: settings.data.support_whatsapp, leads: visible }); } catch (error) { fail(res, error); }
 });
 
-router.get('/api/lead-marketplace/history', requireAccess(['broker','supervisor']), async (req, res) => { const { data, error } = await supabase.from('marketplace_purchases').select('id,price,purchased_at,crm_lead_id,marketplace_leads(name,phone,email,profile,lives_count,product_interest,city,state)').eq('buyer_user_id', req.accessUser.id).order('purchased_at', { ascending: false }); if (error) return fail(res, error); res.json({ ok: true, purchases: data || [] }); });
+router.get('/api/lead-marketplace/history', requireAccess(['broker','supervisor']), async (req, res) => { const { data, error } = await supabase.from('marketplace_purchases').select('id,price,purchased_at,crm_lead_id,marketplace_leads(name,phone,email,profile,lives_count,beneficiary_ages,product_interest,city,state)').eq('buyer_user_id', req.accessUser.id).order('purchased_at', { ascending: false }); if (error) return fail(res, error); res.json({ ok: true, purchases: data || [] }); });
 router.post('/api/lead-marketplace/:id/buy', requireAccess(['broker','supervisor']), async (req, res) => { if (!UUID.test(req.params.id)) return res.status(400).json({ ok: false, error: 'Lead invalido.' }); const { data, error } = await supabase.rpc('buy_marketplace_lead', { p_user_id: req.accessUser.id, p_lead_id: req.params.id }); if (error) return fail(res, error); try { await addLegacyLead(req.accessUser, req.accessToken, data.lead); } catch (legacyError) { console.error('[LEAD MARKETPLACE LEGACY SYNC]', legacyError.message || legacyError); } res.json({ ok: true, purchase: data }); });
 
 module.exports = router;
