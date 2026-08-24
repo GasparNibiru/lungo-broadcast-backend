@@ -26,10 +26,17 @@ function metaSignatureValid(req) {
   const left = Buffer.from(signature); const right = Buffer.from(expected);
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
-function metaFields(data) {
-  return Object.fromEntries((data?.field_data || []).map((field) => [String(field.name || '').toLowerCase(), String(field.values?.[0] || '').trim()]));
+function normalizeMetaKey(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
-function firstMetaField(fields, names) { for (const name of names) if (fields[name]) return fields[name]; return ''; }
+function metaFields(data) {
+  return Object.fromEntries((data?.field_data || []).map((field) => [normalizeMetaKey(field.name), String(field.values?.[0] || '').trim()]));
+}
+function firstMetaField(fields, names, fragments = []) {
+  for (const name of names) if (fields[name]) return fields[name];
+  const entry = Object.entries(fields).find(([key, value]) => value && fragments.some((fragment) => key.includes(fragment)));
+  return entry?.[1] || '';
+}
 async function metaAdDetails(adId, token, version) {
   if (!adId) return {};
   try {
@@ -52,9 +59,14 @@ async function importMetaLead(value) {
     params: { fields: META_FIELDS, access_token: token }, timeout: 15000
   });
   const fields = metaFields(data);
-  const name = firstMetaField(fields, ['full_name','nome_completo','name','nome']);
-  const phone = firstMetaField(fields, ['phone_number','telefone','whatsapp','celular']).replace(/\D/g, '');
-  if (!name || phone.length < 8) throw new Error(`Lead Meta ${leadId} sem nome ou telefone valido.`);
+  const firstName = firstMetaField(fields, ['first_name','primeiro_nome']);
+  const lastName = firstMetaField(fields, ['last_name','sobrenome']);
+  const name = firstMetaField(fields, ['full_name','nome_completo','name','nome']) || [firstName, lastName].filter(Boolean).join(' ') || firstMetaField(fields, [], ['nome','name']);
+  const phone = firstMetaField(fields, ['phone_number','numero_de_telefone','telefone','whatsapp','celular'], ['phone','telefone','whatsapp','celular']).replace(/\D/g, '');
+  if (!name || phone.length < 8) {
+    console.warn('[META LEAD ADS] Campos recebidos sem dados pessoais:', Object.keys(fields).join(', ') || 'nenhum');
+    throw new Error(`Lead Meta ${leadId} sem nome ou telefone valido.`);
+  }
   const profileValue = firstMetaField(fields, ['profile','perfil','tipo_de_contratacao','tipo']).toLowerCase();
   const profile = profileValue.includes('pj') || profileValue.includes('empresa') ? 'PJ' : profileValue.includes('ades') ? 'Adesao' : 'PF';
   const lives = Math.max(0, Number(firstMetaField(fields, ['lives_count','quantidade_de_vidas','qtd_de_vidas','vidas'])) || 0);
@@ -67,7 +79,7 @@ async function importMetaLead(value) {
   const receivedAt = new Date().toISOString();
   const payload = {
     external_id: leadId, name, phone,
-    email: firstMetaField(fields, ['email','e_mail']) || null, profile, lives_count: lives,
+    email: firstMetaField(fields, ['email','e_mail'], ['email']) || null, profile, lives_count: lives,
     product_interest: firstMetaField(fields, ['product_interest','plano_de_interesse','operadora','interesse']) || null,
     city: firstMetaField(fields, ['city','cidade']) || null,
     state: firstMetaField(fields, ['state','estado','uf']).slice(0, 2).toUpperCase() || null,
