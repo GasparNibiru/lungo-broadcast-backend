@@ -33,7 +33,7 @@ create table if not exists training_progress (
   organization_id uuid references organizations(id) on delete cascade,
   organization_name text,
   watched_seconds integer not null default 0 check (watched_seconds >= 0),
-  current_time integer not null default 0 check (current_time >= 0),
+  "current_time" integer not null default 0 check ("current_time" >= 0),
   duration integer not null default 0 check (duration >= 0),
   percent smallint not null default 0 check (percent between 0 and 100),
   status text not null default 'in_progress' check (status in ('not_started','in_progress','completed')),
