@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 dotenv.config();
+require('./environment-guard').assertEnvironmentIsolation();
 
 const databaseHealthRouter = require('./routes/database-health');
 const adminSubscriptionsRouter = require('./routes/admin-subscriptions');
@@ -38,7 +39,7 @@ const PORT = Number(process.env.PORT || 80);
 const VERSION = '1.3.0';
 const ROOT = path.resolve(__dirname, '..');
 const UPLOAD_DIR = path.join(ROOT, 'storage', 'uploads');
-const INSTANCES_FILE = path.join(ROOT, 'data', 'instances.json');
+const INSTANCES_FILE = process.env.INSTANCES_FILE_PATH || path.join(ROOT, 'data', 'instances.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 app.disable('x-powered-by');
