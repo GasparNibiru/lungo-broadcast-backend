@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const realExpress = require('express');
+const { defaultLeadService } = require('./modules/leads/lead-service');
 
 let registered = false;
 const VERSION = '2.0.0-auto-crm-pipeline';
@@ -776,18 +777,26 @@ async function createOrUpdateManualLead(req, res, existingId = '') {
     const client = findClientByToken(token);
     if (!client) return send(res, 403, { ok: false, error: 'Token inválido ou inativo.', version: VERSION });
 
-    const leads = loadArray(LEADS_FILE);
+    let leads = loadArray(LEADS_FILE);
     const id = clean(existingId || req.params?.id || '');
     const index = id ? leads.findIndex((lead) => lead.id === id && clean(lead.instanceName) === clean(client.instanceName)) : -1;
     const current = index >= 0 ? leads[index] : {};
 
     if (id && index < 0) return send(res, 404, { ok: false, error: 'Lead não encontrado para este cliente.', version: VERSION });
 
-    const lead = buildLeadFromBody(body, client, current);
+    let lead = buildLeadFromBody(body, client, current);
 
     if (index >= 0) leads[index] = lead;
-    else leads.push(lead);
-    saveArray(LEADS_FILE, leads);
+    else {
+      const created = defaultLeadService.createLead({
+        source: lead.origem,
+        data: lead,
+        context: { instanceName: client.instanceName, preserveLegacyRecord: true }
+      });
+      lead = created.lead;
+      leads = created.leads;
+    }
+    if (index >= 0) saveArray(LEADS_FILE, leads);
 
     return send(res, index >= 0 ? 200 : 201, { ok: true, lead: publicLead(lead), summary: summarizeLeads(leads.filter((item) => clean(item.instanceName) === clean(client.instanceName))), version: VERSION });
   } catch (error) {
