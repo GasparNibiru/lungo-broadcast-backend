@@ -10,6 +10,13 @@ const PUBLIC_FIELDS = [
   'mei_opt_in', 'headquarters_or_branch', 'has_phone', 'has_email'
 ].join(',');
 const STATES = new Set(['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']);
+const SEGMENT_PREFIXES = Object.freeze({
+  restaurants: ['561'], commerce: ['45', '46', '47'], technology: ['62', '63'],
+  health: ['86'], legal: ['6911'], construction: ['41', '42', '43'],
+  transport: ['49', '50', '51', '52', '53'], education: ['85'],
+  finance: ['64', '65', '66'], real_estate: ['68'],
+  industry: ['10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33']
+});
 const SAFE_SEARCH = /^[\p{L}\p{N}\s.&'/-]+$/u;
 
 function badRequest(message) {
@@ -66,6 +73,8 @@ function parseFilters(query = {}) {
   const state = text(query.state, 'state', 2)?.toUpperCase() || null;
   if (state && !STATES.has(state)) throw badRequest('state inválido.');
   const primaryCnaeCode = text(query.primary_cnae_code, 'primary_cnae_code', 10, /^\d+$/);
+  const segment = text(query.segment, 'segment', 40, /^[a-z_]+$/);
+  if (segment && !SEGMENT_PREFIXES[segment]) throw badRequest('segment inválido.');
   const openedAtStart = date(query.opened_at_start, 'opened_at_start');
   const openedAtEnd = date(query.opened_at_end, 'opened_at_end');
   if (openedAtStart && openedAtEnd && openedAtStart > openedAtEnd) throw badRequest('Intervalo de abertura inválido.');
@@ -73,7 +82,7 @@ function parseFilters(query = {}) {
   const shareCapitalMax = money(query.share_capital_max, 'share_capital_max');
   if (shareCapitalMin !== null && shareCapitalMax !== null && shareCapitalMin > shareCapitalMax) throw badRequest('Intervalo de capital social inválido.');
   return {
-    page, limit, search, cityName, state, primaryCnaeCode, openedAtStart, openedAtEnd,
+    page, limit, search, cityName, state, primaryCnaeCode, segment, openedAtStart, openedAtEnd,
     shareCapitalMin, shareCapitalMax,
     simplesOptIn: boolean(query.simples_opt_in, 'simples_opt_in'),
     meiOptIn: boolean(query.mei_opt_in, 'mei_opt_in'),
@@ -88,6 +97,7 @@ function applyFilters(query, filters) {
   if (filters.cityName) result = result.eq('city_name', filters.cityName);
   if (filters.state) result = result.eq('state', filters.state);
   if (filters.primaryCnaeCode) result = result.eq('primary_cnae_code', filters.primaryCnaeCode);
+  if (filters.segment) result = result.or(SEGMENT_PREFIXES[filters.segment].map((prefix) => `primary_cnae_code.like.${prefix}%`).join(','));
   if (filters.openedAtStart) result = result.gte('opened_at', filters.openedAtStart);
   if (filters.openedAtEnd) result = result.lte('opened_at', filters.openedAtEnd);
   if (filters.shareCapitalMin !== null) result = result.gte('share_capital', filters.shareCapitalMin);
@@ -132,6 +142,7 @@ function createBusinessIntelligenceRouter({
 
 module.exports = createBusinessIntelligenceRouter();
 module.exports.PUBLIC_FIELDS = PUBLIC_FIELDS;
+module.exports.SEGMENT_PREFIXES = SEGMENT_PREFIXES;
 module.exports.applyFilters = applyFilters;
 module.exports.createBusinessIntelligenceRouter = createBusinessIntelligenceRouter;
 module.exports.parseFilters = parseFilters;
