@@ -33,6 +33,7 @@ const campaignMediaRouter = require('./routes/campaign-media');
 const asaasWebhooksRouter = require('./routes/asaas-webhooks');
 const publicCheckoutRouter = require('./routes/public-checkout');
 const brazilPartnersRouter = require('./routes/brazil-partners');
+const businessIntelligenceRouter = require('./routes/business-intelligence');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -79,6 +80,7 @@ app.use(campaignMediaRouter);
 app.use(asaasWebhooksRouter);
 app.use(publicCheckoutRouter);
 app.use(brazilPartnersRouter);
+app.use(businessIntelligenceRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
