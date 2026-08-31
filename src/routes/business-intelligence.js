@@ -75,6 +75,9 @@ function parseFilters(query = {}) {
   const primaryCnaeCode = text(query.primary_cnae_code, 'primary_cnae_code', 10, /^\d+$/);
   const segment = text(query.segment, 'segment', 40, /^[a-z_]+$/);
   if (segment && !SEGMENT_PREFIXES[segment]) throw badRequest('segment inválido.');
+  const companyType = text(query.company_type, 'company_type', 20, /^[a-z_]+$/);
+  if (companyType && !['headquarters', 'branch'].includes(companyType)) throw badRequest('company_type inválido.');
+  const openedYear = integer(query.opened_year, null, 'opened_year', { min: 1900, max: new Date().getFullYear() });
   const openedAtStart = date(query.opened_at_start, 'opened_at_start');
   const openedAtEnd = date(query.opened_at_end, 'opened_at_end');
   if (openedAtStart && openedAtEnd && openedAtStart > openedAtEnd) throw badRequest('Intervalo de abertura inválido.');
@@ -82,7 +85,7 @@ function parseFilters(query = {}) {
   const shareCapitalMax = money(query.share_capital_max, 'share_capital_max');
   if (shareCapitalMin !== null && shareCapitalMax !== null && shareCapitalMin > shareCapitalMax) throw badRequest('Intervalo de capital social inválido.');
   return {
-    page, limit, search, cityName, state, primaryCnaeCode, segment, openedAtStart, openedAtEnd,
+    page, limit, search, cityName, state, primaryCnaeCode, segment, companyType, openedYear, openedAtStart, openedAtEnd,
     shareCapitalMin, shareCapitalMax,
     simplesOptIn: boolean(query.simples_opt_in, 'simples_opt_in'),
     meiOptIn: boolean(query.mei_opt_in, 'mei_opt_in'),
@@ -98,6 +101,13 @@ function applyFilters(query, filters) {
   if (filters.state) result = result.eq('state', filters.state);
   if (filters.primaryCnaeCode) result = result.eq('primary_cnae_code', filters.primaryCnaeCode);
   if (filters.segment) result = result.or(SEGMENT_PREFIXES[filters.segment].map((prefix) => `primary_cnae_code.like.${prefix}%`).join(','));
+  if (filters.companyType) {
+    const values = filters.companyType === 'headquarters' ? ['matriz', 'headquarters'] : ['filial', 'branch'];
+    result = result.or(values.map((value) => `headquarters_or_branch.ilike.%${value}%`).join(','));
+  }
+  if (filters.openedYear) {
+    result = result.gte('opened_at', `${filters.openedYear}-01-01`).lte('opened_at', `${filters.openedYear}-12-31`);
+  }
   if (filters.openedAtStart) result = result.gte('opened_at', filters.openedAtStart);
   if (filters.openedAtEnd) result = result.lte('opened_at', filters.openedAtEnd);
   if (filters.shareCapitalMin !== null) result = result.gte('share_capital', filters.shareCapitalMin);
@@ -120,6 +130,7 @@ function createBusinessIntelligenceRouter({
       const offset = (filters.page - 1) * filters.limit;
       let query = getClient().from('companies').select(PUBLIC_FIELDS, { count: 'exact' });
       query = applyFilters(query, filters)
+        .order('opened_at', { ascending: false, nullsFirst: false })
         .order('quality_score', { ascending: false })
         .order('cnpj', { ascending: true })
         .range(offset, offset + filters.limit - 1);

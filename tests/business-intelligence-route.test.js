@@ -63,6 +63,8 @@ test('supports the initial search filters and database pagination', async (t) =>
     'share_capital_min=10000&share_capital_max=50000',
     'q=Empresa%20Teste',
     'segment=technology',
+    'company_type=headquarters',
+    'opened_year=2024',
     'page=1&limit=25',
     'page=2&limit=25'
   ];
@@ -73,7 +75,10 @@ test('supports the initial search filters and database pagination', async (t) =>
     assert.equal(result.body.pagination.total, 51, query);
   }
   assert.deepEqual(ctx.queries.at(-1).calls.find((call) => call[0] === 'range'), ['range', 25, 49]);
-  assert.deepEqual(ctx.queries.at(-3).calls.find((call) => call[0] === 'or'), ['or', 'primary_cnae_code.like.62%,primary_cnae_code.like.63%']);
+  assert.ok(ctx.queries.some((query) => query.calls.some((call) => call[0] === 'or' && call[1] === 'primary_cnae_code.like.62%,primary_cnae_code.like.63%')));
+  assert.ok(ctx.queries.some((query) => query.calls.some((call) => call[0] === 'or' && call[1].includes('headquarters_or_branch.ilike.%matriz%'))));
+  assert.ok(ctx.queries.some((query) => query.calls.some((call) => call[0] === 'gte' && call[1] === 'opened_at' && call[2] === '2024-01-01')));
+  assert.deepEqual(ctx.queries.at(-1).calls.filter((call) => call[0] === 'order')[0], ['order', 'opened_at', { ascending: false, nullsFirst: false }]);
 });
 
 test('never selects or returns contact fields', async (t) => {
@@ -106,4 +111,6 @@ test('validates limits, booleans, ranges and search syntax', () => {
   assert.throws(() => parseFilters({ share_capital_min: '20', share_capital_max: '10' }), /Intervalo de capital/);
   assert.throws(() => parseFilters({ q: 'Empresa),state.eq.SP' }), /Busca inválido/);
   assert.throws(() => parseFilters({ segment: 'unknown' }), /segment inválido/);
+  assert.throws(() => parseFilters({ company_type: 'unknown' }), /company_type inválido/);
+  assert.throws(() => parseFilters({ opened_year: '1899' }), /opened_year inválido/);
 });
