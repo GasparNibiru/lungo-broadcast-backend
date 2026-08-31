@@ -22,7 +22,7 @@ function queryMock() {
     range(from, to) { calls.push(['range', from, to]); return this; },
     then(resolve, reject) {
       return Promise.resolve({
-        data: [{ cnpj: '00000000000001', legal_name: 'Empresa Teste', has_phone: true, has_email: true }],
+        data: [{ cnpj: '00000000000001', legal_name: 'Empresa Teste', has_phone: true, has_email: true, phone_1: '11999999999', phone_2: null, email: 'contato@empresa.test' }],
         count: 51,
         error: null
       }).then(resolve, reject);
@@ -81,17 +81,16 @@ test('supports the initial search filters and database pagination', async (t) =>
   assert.deepEqual(ctx.queries.at(-1).calls.filter((call) => call[0] === 'order')[0], ['order', 'opened_at', { ascending: false, nullsFirst: false }]);
 });
 
-test('never selects or returns contact fields', async (t) => {
+test('returns contact fields only through the authenticated route', async (t) => {
   const ctx = await fixture();
   t.after(ctx.close);
   const result = await get(ctx.baseUrl, 'page=1');
   const selected = ctx.queries[0].calls.find((call) => call[0] === 'select')[1].split(',');
-  assert.equal(selected.includes('phone_1'), false);
-  assert.equal(selected.includes('phone_2'), false);
-  assert.equal(selected.includes('email'), false);
-  assert.equal(Object.hasOwn(result.body.companies[0], 'phone_1'), false);
-  assert.equal(Object.hasOwn(result.body.companies[0], 'phone_2'), false);
-  assert.equal(Object.hasOwn(result.body.companies[0], 'email'), false);
+  assert.equal(selected.includes('phone_1'), true);
+  assert.equal(selected.includes('phone_2'), true);
+  assert.equal(selected.includes('email'), true);
+  assert.equal(result.body.companies[0].phone_1, '11999999999');
+  assert.equal(result.body.companies[0].email, 'contato@empresa.test');
 });
 
 test('rejects unauthenticated requests before querying business data', async (t) => {

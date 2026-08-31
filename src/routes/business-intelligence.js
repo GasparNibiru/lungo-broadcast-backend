@@ -7,7 +7,8 @@ const { getBusinessIntelligenceSupabase } = require('../database/business-intell
 const PUBLIC_FIELDS = [
   'cnpj', 'legal_name', 'trade_name', 'city_name', 'state', 'opened_at',
   'company_size', 'share_capital', 'primary_cnae_code', 'simples_opt_in',
-  'mei_opt_in', 'headquarters_or_branch', 'has_phone', 'has_email'
+  'mei_opt_in', 'headquarters_or_branch', 'has_phone', 'has_email',
+  'phone_1', 'phone_2', 'email'
 ].join(',');
 const STATES = new Set(['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']);
 const SEGMENT_PREFIXES = Object.freeze({
@@ -121,7 +122,7 @@ function applyFilters(query, filters) {
 
 function createBusinessIntelligenceRouter({
   getClient = getBusinessIntelligenceSupabase,
-  auth = requireAccess()
+  auth = requireAccess(['supervisor', 'broker'])
 } = {}) {
   const router = express.Router();
   router.get('/api/business-intelligence/companies', auth, async (req, res) => {
