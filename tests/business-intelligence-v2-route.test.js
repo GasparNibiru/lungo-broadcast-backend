@@ -81,7 +81,9 @@ test('queries only companies_v2 with the exact public fields and deterministic o
     ['order', 'cnpj', { ascending: true }]
   ]);
   assert.deepEqual(calls.find((call) => call[0] === 'range'), ['range', 25, 49]);
-  assert.deepEqual(Object.keys(result.body.companies[0]), PUBLIC_FIELDS.split(','));
+  assert.deepEqual(Object.keys(result.body.companies[0]), [...PUBLIC_FIELDS.split(','), 'company_id', 'is_acquired', 'selectable']);
+  assert.equal(result.body.companies[0].is_acquired, false);
+  assert.equal(result.body.companies[0].cnpj, '**.***.***/****-**');
 });
 
 test('applies all approved V2 filters', async (t) => {

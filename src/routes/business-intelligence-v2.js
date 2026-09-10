@@ -3,6 +3,7 @@
 const express = require('express');
 const { requireAccess } = require('../middleware/require-access');
 const { getBusinessIntelligenceSupabase } = require('../database/business-intelligence-supabase');
+const { createService } = require('../modules/prospecting/service');
 
 const PUBLIC_FIELDS = [
   'cnpj', 'trade_name', 'legal_name', 'mobile_1', 'mobile_2', 'email',
@@ -62,10 +63,13 @@ function applyFilters(query, filters) {
 
 function createBusinessIntelligenceV2Router({
   getClient = getBusinessIntelligenceSupabase,
-  auth = requireAccess(['broker', 'supervisor'])
+  auth = requireAccess(['broker', 'supervisor']),
+  prospecting = createService()
 } = {}) {
   const router = express.Router();
   router.get('/api/business-intelligence/companies-v2', auth, async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    res.set('Vary', 'x-access-token, Authorization');
     try {
       const filters = parseFilters(req.query);
       const offset = (filters.page - 1) * filters.limit;
@@ -79,7 +83,7 @@ function createBusinessIntelligenceV2Router({
       const total = Number(count || 0);
       return res.json({
         ok: true,
-        companies: data || [],
+        ...await prospecting.project(data || [], req.accessUser?.id),
         pagination: { total, page: filters.page, limit: filters.limit, totalPages: Math.ceil(total / filters.limit) }
       });
     } catch (error) {

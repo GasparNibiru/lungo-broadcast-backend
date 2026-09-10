@@ -89,8 +89,9 @@ test('returns contact fields only through the authenticated route', async (t) =>
   assert.equal(selected.includes('phone_1'), true);
   assert.equal(selected.includes('phone_2'), true);
   assert.equal(selected.includes('email'), true);
-  assert.equal(result.body.companies[0].phone_1, '11999999999');
-  assert.equal(result.body.companies[0].email, 'contato@empresa.test');
+  assert.equal(result.body.companies[0].phone_1, '(**) *****-****');
+  assert.equal(result.body.companies[0].email, '***@***');
+  assert.equal(result.body.ownershipUnavailable, true);
 });
 
 test('rejects unauthenticated requests before querying business data', async (t) => {
