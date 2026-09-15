@@ -611,5 +611,6 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
+  require('./modules/prospecting/export-worker').start(require('./database/supabase'));
   console.log(`Lungo Broadcast API ${VERSION} online na porta ${PORT}`);
 });

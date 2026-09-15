@@ -6,6 +6,17 @@ processamento/importação existente. Não foi reaplicada nem alterada a migrati
 
 ## Endpoints
 
+Atualização de 15/09/2026, ainda não publicada no backend de staging: pedido
+`POST /api/prospecting/exports` com `{company_id}` (ID do direito de `Minhas
+empresas`) e consulta `GET /api/prospecting/exports/:id`. O servidor verifica
+propriedade, chama `prospecting_request_export` e um processador de staging
+reivindica a outbox via `prospecting_claim_jobs`. O lead recebe ID determinístico
+`prospecting_<export-id>` e referência ao direito; repetir a exportação reutiliza
+o registro. Resultado ambíguo fica `unknown` para revisão. Nenhum contato do
+navegador é aceito como fonte. O serviço deve ter uma única réplica enquanto
+`Meus Leads` usar JSON local; os escritores legados assíncronos de marketplace e
+atribuição foram tornados síncronos na seção de leitura/gravação do arquivo.
+
 Todos exigem `requireAccess` para broker/supervisor e usam `req.accessUser.id`.
 Respostas privadas com `Cache-Control: private, no-store`.
 
@@ -80,5 +91,5 @@ publicado ainda executa a versão anterior. Não habilitar apenas a UI como cont
 de acesso. Rollback da UI pode usar as rotas antigas protegidas; não reverter a
 proteção backend para uma versão que entregue os contatos sem direitos.
 
-Sem Admin de tokens, atribuição, atendimento, agendamento, workers, exportação,
+Sem Admin de tokens, atribuição, atendimento, agendamento,
 VOIP ou mudanças em outros fluxos. Nenhum deploy manual backend nesta entrega.

@@ -37,7 +37,7 @@ function applyFilters(query, f) {
   return query;
 }
 function pagination(f, count) { return { page: f.page, limit: f.limit, total: Number(count || 0), totalPages: Math.ceil(Number(count || 0) / f.limit) }; }
-function createService({ getOperational = operationalClient, getCatalog = getBusinessIntelligenceSupabase, getOpaque = serverOpaque, version = SOURCE_VERSION } = {}) {
+function createService({ getOperational = operationalClient, getCatalog = getBusinessIntelligenceSupabase, getOpaque = serverOpaque, ensureLegacy = (user, token) => require('../../services/legacy-broker-access').ensure(user, token), version = SOURCE_VERSION } = {}) {
   async function rpc(name, args) {
     const result = await getOperational().rpc(name, args);
     if (result.error) {
@@ -75,6 +75,25 @@ function createService({ getOperational = operationalClient, getCatalog = getBus
   }
   return {
     project,
+    async requestExport(user, token, body = {}) {
+      if (!body || Object.keys(body).some(k => k !== 'company_id') || typeof body.company_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.company_id)) throw fail('Empresa adquirida inválida.');
+      const { data: owned, error: ownedError } = await getOperational().from('prospecting_user_companies')
+        .select('id,user_id').eq('id', body.company_id).eq('user_id', user.id).maybeSingle();
+      if (ownedError) throw fail('Não foi possível verificar a empresa.', 'operational_unavailable', 503);
+      if (!owned || owned.user_id !== user.id) throw fail('Empresa não encontrada em Minhas empresas.', 'company_not_owned', 404);
+      await ensureLegacy(user, token);
+      const result = await rpc('prospecting_request_export', { p_user: user.id, p_company: owned.id });
+      if (!result?.exportId) throw fail('Não foi possível solicitar a exportação.', 'operational_unavailable', 503);
+      return { export_id: result.exportId, ...await this.exportStatus(user, result.exportId) };
+    },
+    async exportStatus(user, exportId) {
+      if (typeof exportId !== 'string' || !/^[0-9a-f-]{36}$/i.test(exportId)) throw fail('Exportação inválida.');
+      const { data, error } = await getOperational().from('prospecting_lead_exports')
+        .select('id,owner_user_id,user_company_id,status,target_lead_id,last_error_code').eq('id', exportId).eq('owner_user_id', user.id).maybeSingle();
+      if (error) throw fail('Não foi possível consultar a exportação.', 'operational_unavailable', 503);
+      if (!data || data.owner_user_id !== user.id) throw fail('Exportação não encontrada.', 'export_not_owned', 404);
+      return { status: data.status, lead_id: data.status === 'exported' ? data.target_lead_id : null, error_code: data.status === 'failed' || data.status === 'unknown' ? data.last_error_code : null };
+    },
     async wallet(user) {
       const w = await rpc('prospecting_get_wallet', { p_user: user.id });
       if (!w || !Number.isSafeInteger(Number(w.total))) throw fail('Saldo indisponível.', 'operational_unavailable', 503);

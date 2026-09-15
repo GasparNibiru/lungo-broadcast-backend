@@ -3,6 +3,7 @@ const requireAdmin = require('../middleware/require-admin');
 const { requireAccess } = require('../middleware/require-access');
 const supabase = require('../database/supabase');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
@@ -124,7 +125,25 @@ function fail(res, error, fallback = 'Erro no marketplace de leads.') { console.
 function maskedName(value) { const text = String(value || '').trim(); const visible = Math.min(5, text.length); return text ? `${text.slice(0, visible)}${'*'.repeat(Math.max(3, text.length - visible))}` : '*****'; }
 function maskedPhone(value) { const digits = String(value || '').replace(/\D/g, ''); if (digits.startsWith('55') && digits.length >= 12) return `55 (${digits.slice(2, 4)}) ${'*'.repeat(Math.max(5, digits.length - 6))}${digits.slice(-2)}`; return digits.length >= 4 ? `(${digits.slice(0, 2)}) ${'*'.repeat(Math.max(5, digits.length - 4))}${digits.slice(-2)}` : '(**) *****'; }
 function publicOffer(item, minimum) { return { id: item.id, name: maskedName(item.name), phone: maskedPhone(item.phone), profile: item.profile, livesCount: Number(item.lives_count || 0), beneficiaryAges: item.beneficiary_ages, productInterest: item.product_interest, city: item.city, state: item.state, price: effectivePrice(item, minimum), originalPrice: Number(item.original_price ?? item.price), status: item.status === 'reserved' ? 'reserved' : 'available', capturedAt: item.received_at || item.created_at }; }
-async function addLegacyLead(user, token, offer) { const client = await legacyBrokerAccess.ensure(user, token); const file = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json'); let items = []; try { const parsed = JSON.parse(await fs.readFile(file, 'utf8')); items = Array.isArray(parsed) ? parsed : []; } catch (error) { if (error.code !== 'ENOENT') throw error; } if (!items.some((item) => item.marketplaceLeadId === offer.id)) { const now = new Date().toISOString(); items.push({ id: crypto.randomUUID(), marketplaceLeadId: offer.id, instanceName: client.instanceName, nome: offer.name, telefone: offer.phone, email: offer.email || '', pessoaTipo: offer.profile, qtdVidas: Number(offer.lives_count || 0), planoInteresse: offer.product_interest || '', cidade: offer.city || '', status: 'novo', origem: 'Marketplace de Leads', observacao: `Lead adquirido no marketplace interno.${offer.beneficiary_ages ? `\nIdades dos beneficiários: ${offer.beneficiary_ages}` : ''}`, createdAt: now, updatedAt: now }); await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, `${JSON.stringify(items, null, 2)}\n`, 'utf8'); } }
+async function addLegacyLead(user, token, offer) {
+  const client = await legacyBrokerAccess.ensure(user, token);
+  const file = process.env.LEADS_FILE_PATH || path.join(process.cwd(), 'data', 'leads.json');
+  let items = [];
+  try { const parsed = JSON.parse(fsSync.readFileSync(file, 'utf8')); if (!Array.isArray(parsed)) throw new Error('Arquivo de leads inválido.'); items = parsed; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (items.some(item => item.marketplaceLeadId === offer.id)) return;
+  const now = new Date().toISOString();
+  items.push({ id: crypto.randomUUID(), marketplaceLeadId: offer.id, instanceName: client.instanceName,
+    nome: offer.name, telefone: offer.phone, email: offer.email || '', pessoaTipo: offer.profile,
+    qtdVidas: Number(offer.lives_count || 0), planoInteresse: offer.product_interest || '', cidade: offer.city || '',
+    status: 'novo', origem: 'Marketplace de Leads',
+    observacao: `Lead adquirido no marketplace interno.${offer.beneficiary_ages ? `\nIdades dos beneficiários: ${offer.beneficiary_ages}` : ''}`,
+    createdAt: now, updatedAt: now });
+  fsSync.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+  fsSync.writeFileSync(temporary, `${JSON.stringify(items, null, 2)}\n`, 'utf8');
+  fsSync.renameSync(temporary, file);
+}
 
 router.get('/api/integrations/meta/lead-ads/webhook', (req, res) => {
   const expected = String(process.env.META_WEBHOOK_VERIFY_TOKEN || '');
