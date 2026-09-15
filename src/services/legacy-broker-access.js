@@ -1,4 +1,5 @@
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
 
 const filePath = process.env.CLIENTS_FILE_PATH || path.join(process.cwd(), 'data', 'clientes.json');
@@ -93,7 +94,7 @@ async function assignOrganizationLead(organizationId, leadId, brokerUserId, supe
     }
 
     let leads = [];
-    try { const value = JSON.parse(await fs.readFile(leadsFilePath, 'utf8')); leads = Array.isArray(value) ? value : []; }
+    try { const value = JSON.parse(fsSync.readFileSync(leadsFilePath, 'utf8')); if (!Array.isArray(value)) throw new Error('Arquivo de leads inválido.'); leads = value; }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     const index = leads.findIndex((lead) => String(lead.id) === String(leadId)
       && organizationInstances.has(String(lead.instanceName || '').toLowerCase()));
@@ -139,10 +140,10 @@ async function assignOrganizationLead(organizationId, leadId, brokerUserId, supe
     delete assignedLead.supervisorSourceLeadId;
     leads[originIndex] = assignedLead;
     if (legacyDeliveryIndex >= 0) leads.splice(legacyDeliveryIndex, 1);
-    await fs.mkdir(path.dirname(leadsFilePath), { recursive: true });
-    const temporary = `${leadsFilePath}.assign.tmp`;
-    await fs.writeFile(temporary, `${JSON.stringify(leads, null, 2)}\n`, 'utf8');
-    await fs.rename(temporary, leadsFilePath);
+    fsSync.mkdirSync(path.dirname(leadsFilePath), { recursive: true });
+    const temporary = `${leadsFilePath}.assign.${require('crypto').randomUUID()}.tmp`;
+    fsSync.writeFileSync(temporary, `${JSON.stringify(leads, null, 2)}\n`, 'utf8');
+    fsSync.renameSync(temporary, leadsFilePath);
   });
   await leadWriteQueue;
   return assignedLead;
