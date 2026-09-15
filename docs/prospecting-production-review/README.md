@@ -23,6 +23,8 @@ esperado para `APP_ENV`/`NODE_ENV`: staging `hgqtanlzajogxrfbchrl`, produção
 
 1. Confirmar por conexão autenticada de leitura que o projeto operacional é
    exatamente `bnceclhjhgjfirubudwi` e obter o estado atual de migrations.
+   `PRODUCTION_SCHEMA_AUDIT.sql` é uma consulta somente de metadados para essa
+   conferência; o próprio SQL Editor deve estar aberto no projeto correto.
 2. Auditar no banco real as tabelas `public.users` e `public.organizations`,
    tipos de `id`, `organization_id`, `role` e `status`, FKs, privilégios e
    existência prévia de qualquer objeto `prospecting_*`.
