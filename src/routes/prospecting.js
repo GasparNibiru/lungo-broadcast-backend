@@ -17,6 +17,9 @@ function createProspectingRouter({ service = createService(), auth = requireAcce
   router.get('/api/prospecting/companies', handler(req => service.companies(req.accessUser, req.query)));
   router.post('/api/prospecting/acquisitions', handler(req => service.acquire(req.accessUser, req.body)));
   router.get('/api/prospecting/my-companies', handler(req => service.myCompanies(req.accessUser, req.query)));
+  router.get('/api/prospecting/team', handler(req => service.team(req.accessUser)));
+  router.post('/api/prospecting/assignments', handler(req => service.assign(req.accessUser, req.body)));
+  router.post('/api/prospecting/interactions', handler(req => service.recordInteraction(req.accessUser, req.body)));
   router.post('/api/prospecting/exports', handler(req => service.requestExport(req.accessUser, req.accessToken, req.body)));
   router.get('/api/prospecting/exports/:id', handler(req => service.exportStatus(req.accessUser, req.params.id)));
   return router;
