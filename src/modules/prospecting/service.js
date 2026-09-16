@@ -3,6 +3,7 @@ const { FIELDS, pick, masked, serverOpaque } = require('./privacy');
 const { getBusinessIntelligenceSupabase } = require('../../database/business-intelligence-supabase');
 const SOURCE_VERSION = '2026-08'; // companies_v2_2026_08 import; bump only when the catalog is replaced.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CAPITALS = Object.freeze({ 'São Paulo': 'SP', 'Rio de Janeiro': 'RJ', 'Belo Horizonte': 'MG', Curitiba: 'PR', 'Porto Alegre': 'RS' });
 function operationalClient() {
   if (process.env.SUPABASE_URL?.replace(/\/$/, '') !== 'https://hgqtanlzajogxrfbchrl.supabase.co') throw new Error('prospecting_operational_project_not_authorized');
   return require('../../database/supabase');
@@ -19,21 +20,27 @@ function multi(value, pattern, maxLength) {
   return [...new Set(list.map(v => v.trim()))];
 }
 function parseFilters(q = {}) {
-  const allowed = new Set(['state','category','cnae','opened_year','company_size','page','limit']);
+  const allowed = new Set(['state','city','category','cnae','opened_year','company_size','page','limit']);
   if (Object.keys(q).some(k => !allowed.has(k))) throw fail('Filtro não suportado.');
   const state = multi(q.state, /^[A-Za-z]{2}$/, 2)[0]?.toUpperCase();
   if (Array.isArray(q.state) || (state && !'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ').includes(state))) throw fail('UF inválida.');
-  const year = integer(q.opened_year, null, new Date().getFullYear());
-  if (year && year < 1900) throw fail('Ano inválido.');
+  const city = q.city === undefined || q.city === '' ? null : q.city;
+  if (city !== null && (typeof city !== 'string' || !Object.hasOwn(CAPITALS, city) || (state && state !== CAPITALS[city]))) throw fail('Capital ou UF inválida.', 'city_out_of_scope');
+  const currentYear = new Date().getFullYear();
+  const year = integer(q.opened_year, null, currentYear);
+  if (year && year < currentYear - 2) throw fail('Selecione um dos últimos três anos.', 'year_out_of_scope');
   const size = multi(q.company_size, /^[\p{L}\p{N} ._-]+$/u, 64);
   if (size.length > 1) throw fail('Porte inválido.');
-  return { page: integer(q.page, 1, 1000000), limit: integer(q.limit, 25, 100), state, categories: multi(q.category, /^[\p{L}\p{N}\s,.&'()/-]+$/u, 128), cnaes: multi(q.cnae, /^\d{7}$/, 7), year, size: size[0] };
+  return { page: integer(q.page, 1, 1000000), limit: integer(q.limit, 25, 100), state, city, categories: multi(q.category, /^[\p{L}\p{N}\s,.&'()/-]+$/u, 128), cnaes: multi(q.cnae, /^\d{7}$/, 7), year, minYear: currentYear - 2, maxYear: currentYear, size: size[0] };
 }
 function applyFilters(query, f) {
   if (f.state) query = query.eq('state', f.state);
+  if (f.city) query = query.eq('city', f.city);
+  else query = query.in('city', Object.keys(CAPITALS));
   if (f.categories.length) query = query.in('category', f.categories);
   if (f.cnaes.length) query = query.in('cnae', f.cnaes);
   if (f.year) query = query.eq('opened_year', f.year);
+  else query = query.gte('opened_year', f.minYear).lte('opened_year', f.maxYear);
   if (f.size) query = query.eq('company_size', f.size);
   return query;
 }

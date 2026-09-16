@@ -20,7 +20,7 @@ const catalog = Array.from({ length: 120 }, (_, i) => ({ cnpj: String(i + 1).pad
 function catalogClient(legacy = false) {
   return { from() {
     let data = catalog.map(r => legacy ? { ...r, phone_1: r.mobile_1, phone_2: r.mobile_2, city_name: r.city, primary_cnae_code: r.cnae } : r), offset = 0, end = data.length - 1;
-    return { select() { return this; }, eq(k, v) { data = data.filter(r => r[k] === v); return this; }, in(k, vs) { data = data.filter(r => vs.includes(r[k])); return this; }, order() { return this; }, range(a, b) { offset = a; end = b; return this; }, then(resolve, reject) { return Promise.resolve({ data: data.slice(offset, end + 1), count: data.length }).then(resolve, reject); } };
+    return { select() { return this; }, eq(k, v) { data = data.filter(r => r[k] === v); return this; }, gte(k, v) { data = data.filter(r => r[k] >= v); return this; }, lte(k, v) { data = data.filter(r => r[k] <= v); return this; }, in(k, vs) { data = data.filter(r => vs.includes(r[k])); return this; }, order() { return this; }, range(a, b) { offset = a; end = b; return this; }, then(resolve, reject) { return Promise.resolve({ data: data.slice(offset, end + 1), count: data.length }).then(resolve, reject); } };
   } };
 }
 const operational = {
@@ -129,7 +129,7 @@ test('operational outage always masks catalog and both legacy routes; known righ
 test('rejects missing or forbidden access, invalid filters, large batches, foreign and expired opaque IDs', async () => {
   assert.equal((await request('/api/prospecting/wallet', null, 'missing')).status, 401);
   assert.equal((await request('/api/prospecting/wallet', null, 'admin')).status, 403);
-  for (const q of [{ city: 'São Paulo' }, { cnae: '62.or' }, { limit: '101' }, { state: ['SP','RJ'] }, { category: { bad: true } }]) assert.throws(() => parseFilters(q));
+  for (const q of [{ city: 'Santos' }, { city: 'São Paulo', state: 'RJ' }, { cnae: '62.or' }, { limit: '101' }, { state: ['SP','RJ'] }, { category: { bad: true } }]) assert.throws(() => parseFilters(q));
   assert.equal((await request('/api/prospecting/acquisitions', acquisition([0], undefined, other))).status, 400);
   assert.equal((await request('/api/prospecting/acquisitions', acquisition(Array(101).fill(0)))).status, 400);
   const key = crypto.randomBytes(32), old = createOpaqueIds(key, () => 1).issue(catalog[0].cnpj, user.id, '2026-08');
