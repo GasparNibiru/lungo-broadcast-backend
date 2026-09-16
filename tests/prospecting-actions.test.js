@@ -3,8 +3,16 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { createService, parseFilters, applyFilters } = require('../src/modules/prospecting/service');
+const { masked } = require('../src/modules/prospecting/privacy');
 
 const supervisorId = crypto.randomUUID(), brokerId = crypto.randomUUID(), companyId = crypto.randomUUID(), orgId = crypto.randomUUID();
+test('máscara revela só o DDD, inclusive com código do país; número incompleto fica oculto', () => {
+  const result = masked({ cnpj: '12345678000199', mobile_1: '55 (21) 99999-1234', mobile_2: '(11) 8888-1234', email: 'nome@example.invalid' });
+  assert.equal(result.mobile_1, '(21) *****-****'); assert.equal(result.mobile_2, '(11) *****-****');
+  assert.equal(result.cnpj, '**.***.***/****-**'); assert.equal(result.email, '***@***');
+  assert.equal(masked({ mobile_1: '9999' }).mobile_1, '(**) *****-****');
+  assert.ok(!JSON.stringify(result).includes('99999-1234'));
+});
 test('busca padrão fica limitada aos três anos e às capitais; cidade fora do recorte é rejeitada', () => {
   const now = new Date().getFullYear();
   const selected = [];

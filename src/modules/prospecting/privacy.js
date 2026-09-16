@@ -34,7 +34,13 @@ function serverOpaque() {
   return createOpaqueIds(key);
 }
 function pick(row) { return Object.fromEntries(FIELDS.map(field => [field, row[field] ?? null])); }
+function maskedPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  const local = digits.startsWith('55') && [12, 13].includes(digits.length) ? digits.slice(2) : digits;
+  const ddd = /^[1-9]\d{9,10}$/.test(local) ? local.slice(0, 2) : '**';
+  return `(${ddd}) *****-****`;
+}
 function masked(row) {
-  return { ...pick(row), cnpj: '**.***.***/****-**', mobile_1: '(**) *****-****', mobile_2: row.mobile_2 ? '(**) *****-****' : null, email: row.email ? '***@***' : null };
+  return { ...pick(row), cnpj: '**.***.***/****-**', mobile_1: maskedPhone(row.mobile_1), mobile_2: row.mobile_2 ? maskedPhone(row.mobile_2) : null, email: row.email ? '***@***' : null };
 }
 module.exports = { FIELDS, createOpaqueIds, serverOpaque, pick, masked };

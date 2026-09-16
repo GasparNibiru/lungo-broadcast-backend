@@ -88,7 +88,7 @@ test('catalog is allowlisted, masked, opaque, filtered with OR within and AND be
   q.append('category', 'Tecnologia, Software e Comunicação'); q.append('category', 'Saúde'); q.append('cnae', '6201501');
   const r = await request('/api/prospecting/companies?' + q);
   assert.equal(r.status, 200); assert.equal(r.body.pagination.total, 30); assert.equal(r.body.companies.length, 5);
-  for (const c of r.body.companies) { assert.equal(c.is_acquired, false); assert.equal(c.selectable, true); assert.equal(c.category, 'Tecnologia, Software e Comunicação'); assert.equal(c.state, 'SP'); assert.equal(opaque.resolve(c.company_id, user.id).version, '2026-08'); }
+  for (const c of r.body.companies) { assert.equal(c.is_acquired, false); assert.equal(c.selectable, true); assert.equal(c.category, 'Tecnologia, Software e Comunicação'); assert.equal(c.state, 'SP'); assert.equal(c.mobile_1, '(11) *****-****'); assert.equal(c.mobile_2, '(11) *****-****'); assert.equal(opaque.resolve(c.company_id, user.id).version, '2026-08'); }
   const serialized = JSON.stringify(r.body); for (const full of [catalog[0].email, catalog[0].mobile_1, catalog[0].mobile_2, 'nested']) assert.ok(!serialized.includes(full));
   assert.ok(!Buffer.from(r.body.companies[0].company_id, 'base64url').toString().includes('cnpj'));
 });
