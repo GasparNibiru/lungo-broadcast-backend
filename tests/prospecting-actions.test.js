@@ -2,9 +2,20 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { createService } = require('../src/modules/prospecting/service');
+const { createService, parseFilters, applyFilters } = require('../src/modules/prospecting/service');
 
 const supervisorId = crypto.randomUUID(), brokerId = crypto.randomUUID(), companyId = crypto.randomUUID(), orgId = crypto.randomUUID();
+test('busca padrão fica limitada aos três anos e cinco capitais; parâmetros fora do recorte são rejeitados', () => {
+  const now = new Date().getFullYear();
+  const selected = [];
+  const query = { in(k, v) { selected.push([k, 'in', v]); return this; }, gte(k, v) { selected.push([k, '>=', v]); return this; }, lte(k, v) { selected.push([k, '<=', v]); return this; } };
+  applyFilters(query, parseFilters({}));
+  assert.deepEqual(selected, [['city', 'in', ['São Paulo','Rio de Janeiro','Belo Horizonte','Curitiba','Porto Alegre']], ['opened_year', '>=', now - 2], ['opened_year', '<=', now]]);
+  assert.equal(parseFilters({ opened_year: String(now - 2) }).year, now - 2);
+  assert.throws(() => parseFilters({ opened_year: String(now - 3) }), e => e.code === 'year_out_of_scope');
+  assert.equal(parseFilters({ city: 'Curitiba', state: 'PR' }).city, 'Curitiba');
+  assert.throws(() => parseFilters({ city: 'Santos' }), e => e.code === 'city_out_of_scope');
+});
 test('supervisor vê somente corretores ativos da própria organização e distribui sem enviar ator do navegador', async () => {
   const calls = [];
   const db = {
