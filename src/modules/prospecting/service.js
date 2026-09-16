@@ -2,6 +2,7 @@
 const { FIELDS, pick, masked, serverOpaque } = require('./privacy');
 const { getBusinessIntelligenceSupabase } = require('../../database/business-intelligence-supabase');
 const SOURCE_VERSION = '2026-08'; // companies_v2_2026_08 import; bump only when the catalog is replaced.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function operationalClient() {
   if (process.env.SUPABASE_URL?.replace(/\/$/, '') !== 'https://hgqtanlzajogxrfbchrl.supabase.co') throw new Error('prospecting_operational_project_not_authorized');
   return require('../../database/supabase');
@@ -44,6 +45,8 @@ function createService({ getOperational = operationalClient, getCatalog = getBus
       const known = { insufficient_tokens: ['Saldo insuficiente para adquirir o lote completo.', 409], idempotency_key_reused: ['Esta chave já foi usada para outra aquisição.', 409], prospecting_access_denied: ['Acesso à Prospecção não permitido.', 403] };
       const match = known[result.error.message];
       if (match) throw fail(match[0], result.error.message, match[1]);
+      const additional = { assignment_access_denied: ['Corretor não pertence à sua equipe.', 403], version_conflict: ['Este atendimento foi atualizado. Recarregue a empresa.', 409], company_not_owned: ['Empresa não pertence a este usuário.', 404] }[result.error.message];
+      if (additional) throw fail(additional[0], result.error.message, additional[1]);
       throw fail('Não foi possível concluir a operação. Tente novamente.', 'operational_unavailable', 503);
     }
     return result.data;
@@ -75,6 +78,26 @@ function createService({ getOperational = operationalClient, getCatalog = getBus
   }
   return {
     project,
+    async team(user) {
+      if (user.role !== 'supervisor') throw fail('Somente supervisores podem distribuir empresas.', 'supervisor_required', 403);
+      const { data: supervisor, error: supervisorError } = await getOperational().from('users').select('id,organization_id,role,status').eq('id', user.id).maybeSingle();
+      if (supervisorError || !supervisor || supervisor.role !== 'supervisor' || supervisor.status !== 'active') throw fail('Equipe indisponível.', 'team_unavailable', 503);
+      const { data, error } = await getOperational().from('users').select('id,name,organization_id,role,status').eq('organization_id', supervisor.organization_id).eq('role', 'broker').eq('status', 'active').order('name');
+      if (error || !Array.isArray(data)) throw fail('Equipe indisponível.', 'team_unavailable', 503);
+      return { brokers: data.filter(b => b.organization_id === supervisor.organization_id && b.role === 'broker' && b.status === 'active').map(b => ({ id: b.id, name: b.name || 'Corretor' })) };
+    },
+    async assign(user, body = {}) {
+      if (user.role !== 'supervisor') throw fail('Somente supervisores podem distribuir empresas.', 'supervisor_required', 403);
+      if (!UUID.test(body.company_id || '') || !UUID.test(body.broker_id || '') || typeof body.idempotency_key !== 'string' || !/^[A-Za-z0-9_-]{8,160}$/.test(body.idempotency_key)) throw fail('Empresa, corretor ou solicitação inválida.');
+      const result = await rpc('prospecting_assign', { p_supervisor: user.id, p_broker: body.broker_id, p_key: body.idempotency_key, p_company_ids: [body.company_id] });
+      return { assignment: result };
+    },
+    async recordInteraction(user, body = {}) {
+      if (!UUID.test(body.company_id || '') || typeof body.idempotency_key !== 'string' || !/^[A-Za-z0-9_-]{8,160}$/.test(body.idempotency_key) || !['new','contacted','follow_up','interested','not_interested','converted'].includes(body.status) || typeof body.notes !== 'string' || body.notes.length > 10000 || !Number.isSafeInteger(body.expected_version) || body.expected_version < 0) throw fail('Dados do atendimento inválidos.');
+      for (const value of [body.contact_at, body.follow_up_at]) if (value != null && (typeof value !== 'string' || !Number.isFinite(Date.parse(value)))) throw fail('Data do atendimento inválida.');
+      const result = await rpc('prospecting_record_interaction', { p_user: user.id, p_company: body.company_id, p_key: body.idempotency_key, p_status: body.status, p_notes: body.notes, p_contact: body.contact_at || null, p_follow_up: body.follow_up_at || null, p_expected_version: body.expected_version });
+      return { interaction: result };
+    },
     async requestExport(user, token, body = {}) {
       if (!body || Object.keys(body).some(k => k !== 'company_id') || typeof body.company_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.company_id)) throw fail('Empresa adquirida inválida.');
       const { data: owned, error: ownedError } = await getOperational().from('prospecting_user_companies')
@@ -125,10 +148,10 @@ function createService({ getOperational = operationalClient, getCatalog = getBus
     async myCompanies(user, query) {
       if (Object.keys(query).some(k => !['page','limit'].includes(k))) throw fail('Filtro não suportado.');
       const f = parseFilters(query), offset = (f.page - 1) * f.limit;
-      const { data, count, error } = await getOperational().from('prospecting_user_companies').select(`id,user_id,acquired_at,snapshot:prospecting_company_snapshots(${FIELDS.join(',')})`, { count: 'exact' })
+      const { data, count, error } = await getOperational().from('prospecting_user_companies').select(`id,user_id,acquired_at,service_status,notes,last_contact_at,next_follow_up_at,version,snapshot:prospecting_company_snapshots(${FIELDS.join(',')})`, { count: 'exact' })
         .eq('user_id', user.id).order('acquired_at', { ascending: false }).order('id', { ascending: true }).range(offset, offset + f.limit - 1);
       if (error || !Array.isArray(data) || data.some(r => r.user_id !== user.id || !r.snapshot)) throw fail('Não foi possível consultar suas empresas.', 'operational_unavailable', 503);
-      return { companies: data.map(r => ({ ...pick(r.snapshot), id: r.id, acquired_at: r.acquired_at, is_acquired: true, selectable: false })), pagination: pagination(f, count), role: user.role };
+      return { companies: data.map(r => ({ ...pick(r.snapshot), id: r.id, acquired_at: r.acquired_at, service_status: r.service_status, notes: r.notes, last_contact_at: r.last_contact_at, next_follow_up_at: r.next_follow_up_at, version: r.version, is_acquired: true, selectable: false })), pagination: pagination(f, count), role: user.role };
     }
   };
 }
