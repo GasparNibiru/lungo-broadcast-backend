@@ -33,6 +33,9 @@ const campaignMediaRouter = require('./routes/campaign-media');
 const asaasWebhooksRouter = require('./routes/asaas-webhooks');
 const publicCheckoutRouter = require('./routes/public-checkout');
 const brazilPartnersRouter = require('./routes/brazil-partners');
+const businessIntelligenceRouter = require('./routes/business-intelligence');
+const businessIntelligenceV2Router = require('./routes/business-intelligence-v2');
+const prospectingRouter = require('./routes/prospecting');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -79,6 +82,9 @@ app.use(campaignMediaRouter);
 app.use(asaasWebhooksRouter);
 app.use(publicCheckoutRouter);
 app.use(brazilPartnersRouter);
+app.use(businessIntelligenceRouter);
+app.use(businessIntelligenceV2Router);
+app.use(prospectingRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -605,5 +611,6 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
+  require('./modules/prospecting/export-worker').start(require('./database/supabase'));
   console.log(`Lungo Broadcast API ${VERSION} online na porta ${PORT}`);
 });
