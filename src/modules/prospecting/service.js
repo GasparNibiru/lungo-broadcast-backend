@@ -3,7 +3,13 @@ const { FIELDS, pick, masked, serverOpaque } = require('./privacy');
 const { getBusinessIntelligenceSupabase } = require('../../database/business-intelligence-supabase');
 const SOURCE_VERSION = '2026-08'; // companies_v2_2026_08 import; bump only when the catalog is replaced.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CAPITALS = Object.freeze({ 'São Paulo': 'SP', 'Rio de Janeiro': 'RJ', 'Belo Horizonte': 'MG', Curitiba: 'PR', 'Porto Alegre': 'RS' });
+const CAPITALS = Object.freeze({
+  'Rio Branco': 'AC', 'Maceió': 'AL', 'Macapá': 'AP', Manaus: 'AM', Salvador: 'BA', Fortaleza: 'CE',
+  Brasília: 'DF', Vitória: 'ES', Goiânia: 'GO', 'São Luís': 'MA', Cuiabá: 'MT', 'Campo Grande': 'MS',
+  'Belo Horizonte': 'MG', Belém: 'PA', 'João Pessoa': 'PB', Curitiba: 'PR', Recife: 'PE', Teresina: 'PI',
+  'Rio de Janeiro': 'RJ', Natal: 'RN', 'Porto Alegre': 'RS', 'Porto Velho': 'RO', 'Boa Vista': 'RR',
+  Florianópolis: 'SC', 'São Paulo': 'SP', Aracaju: 'SE', Palmas: 'TO'
+});
 function operationalClient() {
   if (process.env.SUPABASE_URL?.replace(/\/$/, '') !== 'https://hgqtanlzajogxrfbchrl.supabase.co') throw new Error('prospecting_operational_project_not_authorized');
   return require('../../database/supabase');

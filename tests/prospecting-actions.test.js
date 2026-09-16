@@ -5,12 +5,14 @@ const crypto = require('node:crypto');
 const { createService, parseFilters, applyFilters } = require('../src/modules/prospecting/service');
 
 const supervisorId = crypto.randomUUID(), brokerId = crypto.randomUUID(), companyId = crypto.randomUUID(), orgId = crypto.randomUUID();
-test('busca padrão fica limitada aos três anos e cinco capitais; parâmetros fora do recorte são rejeitados', () => {
+test('busca padrão fica limitada aos três anos e às capitais; cidade fora do recorte é rejeitada', () => {
   const now = new Date().getFullYear();
   const selected = [];
   const query = { in(k, v) { selected.push([k, 'in', v]); return this; }, gte(k, v) { selected.push([k, '>=', v]); return this; }, lte(k, v) { selected.push([k, '<=', v]); return this; } };
   applyFilters(query, parseFilters({}));
-  assert.deepEqual(selected, [['city', 'in', ['São Paulo','Rio de Janeiro','Belo Horizonte','Curitiba','Porto Alegre']], ['opened_year', '>=', now - 2], ['opened_year', '<=', now]]);
+  assert.equal(selected[0][0], 'city'); assert.equal(selected[0][1], 'in'); assert.equal(selected[0][2].length, 27);
+  for (const capital of ['Rio Branco','Brasília','São Paulo','Palmas']) assert.ok(selected[0][2].includes(capital));
+  assert.deepEqual(selected.slice(1), [['opened_year', '>=', now - 2], ['opened_year', '<=', now]]);
   assert.equal(parseFilters({ opened_year: String(now - 2) }).year, now - 2);
   assert.throws(() => parseFilters({ opened_year: String(now - 3) }), e => e.code === 'year_out_of_scope');
   assert.equal(parseFilters({ city: 'Curitiba', state: 'PR' }).city, 'Curitiba');
