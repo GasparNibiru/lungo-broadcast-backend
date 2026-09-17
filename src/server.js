@@ -36,6 +36,7 @@ const brazilPartnersRouter = require('./routes/brazil-partners');
 const businessIntelligenceRouter = require('./routes/business-intelligence');
 const businessIntelligenceV2Router = require('./routes/business-intelligence-v2');
 const prospectingRouter = require('./routes/prospecting');
+const supervisorFinanceRouter = require('./routes/supervisor-finance');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -85,6 +86,7 @@ app.use(brazilPartnersRouter);
 app.use(businessIntelligenceRouter);
 app.use(businessIntelligenceV2Router);
 app.use(prospectingRouter);
+app.use(supervisorFinanceRouter);
 
 const upload = multer({
   storage: multer.diskStorage({
