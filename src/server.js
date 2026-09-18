@@ -37,6 +37,7 @@ const businessIntelligenceRouter = require('./routes/business-intelligence');
 const businessIntelligenceV2Router = require('./routes/business-intelligence-v2');
 const prospectingRouter = require('./routes/prospecting');
 const supervisorFinanceRouter = require('./routes/supervisor-finance');
+const aiAgent = require('./routes/ai-agent');
 
 const app = express();
 const PORT = Number(process.env.PORT || 80);
@@ -87,6 +88,7 @@ app.use(businessIntelligenceRouter);
 app.use(businessIntelligenceV2Router);
 app.use(prospectingRouter);
 app.use(supervisorFinanceRouter);
+app.use(aiAgent.router);
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -613,6 +615,7 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
+  aiAgent.start();
   require('./modules/prospecting/export-worker').start(require('./database/supabase'));
   console.log(`Lungo Broadcast API ${VERSION} online na porta ${PORT}`);
 });
