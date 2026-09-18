@@ -59,6 +59,15 @@ async function createProduct(user, body) {
   await audit(user, 'product_rule', created.data.id, 'created', { productName: payload.rule.product_name });
   return { ...created.data, finance_product_installments: inserted.data };
 }
+async function updateProduct(user, id, body) {
+  const payload = productPayload(body);
+  const current = await supabase.from('finance_product_rules').select('id').eq('id', id).eq('organization_id', user.organizationId).single(); fail(current.error);
+  const updated = await supabase.from('finance_product_rules').update(payload.rule).eq('id', id).eq('organization_id', user.organizationId).select('*').single(); fail(updated.error);
+  const removed = await supabase.from('finance_product_installments').delete().eq('product_rule_id', id); fail(removed.error);
+  const inserted = await supabase.from('finance_product_installments').insert(payload.installments.map(item => ({ ...item, product_rule_id:id }))).select('*'); fail(inserted.error);
+  await audit(user, 'product_rule', id, 'updated', { productName:payload.rule.product_name });
+  return { ...updated.data, finance_product_installments:inserted.data };
+}
 async function createBrokerRule(user, body) {
   const brokerUserId = clean(body.brokerUserId, 36), productRuleId = clean(body.productRuleId, 36);
   const installments = Array.isArray(body.installments) ? body.installments.map((item, index) => ({ installment_number: index + 1, commission_percent: Number(item.commissionPercent), month_offset: Number(item.monthOffset ?? index) })) : [];
@@ -68,6 +77,20 @@ async function createBrokerRule(user, body) {
   if (inserted.error) { await supabase.from('finance_broker_rules').delete().eq('id', rule.data.id).eq('organization_id', user.organizationId); fail(inserted.error); }
   await audit(user, 'broker_rule', rule.data.id, 'created', { brokerUserId, productRuleId });
   return { ...rule.data, finance_broker_installments: inserted.data };
+}
+async function listBrokerRules(user) {
+  const { data, error } = await supabase.from('finance_broker_rules').select('*,finance_broker_installments(*)').eq('organization_id', user.organizationId).eq('active', true);
+  fail(error); return data || [];
+}
+async function updateBrokerRule(user, id, body) {
+  const installments = Array.isArray(body.installments) ? body.installments.map((item,index)=>({ installment_number:index+1, commission_percent:Number(item.commissionPercent), month_offset:Number(item.monthOffset ?? index) })) : [];
+  if (!installments.length || installments.some(item=>!Number.isFinite(item.commission_percent)||item.commission_percent<0)) throw Object.assign(new Error('Informe parcelas de repasse válidas.'),{statusCode:400});
+  const current = await supabase.from('finance_broker_rules').select('id').eq('id', id).eq('organization_id', user.organizationId).single(); fail(current.error);
+  const update = { lifetime_enabled:Boolean(body.lifetimeEnabled), lifetime_percent:body.lifetimeEnabled?Number(body.lifetimePercent||0):0 };
+  const saved = await supabase.from('finance_broker_rules').update(update).eq('id',id).eq('organization_id',user.organizationId).select('*').single(); fail(saved.error);
+  const removed = await supabase.from('finance_broker_installments').delete().eq('broker_rule_id',id); fail(removed.error);
+  const inserted = await supabase.from('finance_broker_installments').insert(installments.map(item=>({...item,broker_rule_id:id}))).select('*'); fail(inserted.error);
+  await audit(user,'broker_rule',id,'updated',{}); return {...saved.data,finance_broker_installments:inserted.data};
 }
 async function syncClosings(user) {
   const config = await settings(user); if (!config?.active) return { imported: 0, active: false };
@@ -84,27 +107,34 @@ async function rows(user, table) { const { data, error } = await supabase.from(t
 
 async function scheduleSale(user, saleId, body) {
   const saleResult = await supabase.from('finance_sales').select('*').eq('id', saleId).eq('organization_id', user.organizationId).single(); fail(saleResult.error); const sale = saleResult.data;
-  if (sale.status !== 'pending') throw Object.assign(new Error('Esta venda já possui programação financeira.'), { statusCode: 409 });
   const ruleResult = await supabase.from('finance_product_rules').select('*,finance_product_installments(*)').eq('id', body.productRuleId).eq('organization_id', user.organizationId).eq('active', true).single(); fail(ruleResult.error); const rule = ruleResult.data;
   const installments = (rule.finance_product_installments || []).sort((a,b) => a.installment_number - b.installment_number).map(item => ({ installmentNumber: item.installment_number, commissionPercent: item.commission_percent, monthOffset: item.month_offset }));
-  const firstDate = dateOnly(body.firstReceivableDate), implantationDate = dateOnly(body.implantationDate);
+  const firstDate = dateOnly(body.firstReceivableDate), implantationDate = dateOnly(body.implantationDate), firstTransferDate = body.firstTransferDate ? dateOnly(body.firstTransferDate) : null;
   const receivables = calculator.buildReceivables({ saleAmount: sale.sale_amount, firstDate, installments, taxMode: rule.tax_mode, taxPercent: rule.tax_percent }).map(item => ({ organization_id: user.organizationId, finance_sale_id: sale.id, entry_type: item.entryType, installment_number: item.installmentNumber, competence: item.competence, due_date: item.dueDate, gross_amount: item.grossAmount, tax_percent: item.taxPercent, tax_amount: item.taxAmount, net_amount: item.netAmount }));
   if (rule.lifetime_enabled && Number(rule.lifetime_percent) > 0) {
     const dueDate = calculator.firstLifetimeDate(firstDate, installments), gross = calculator.percentageOf(calculator.cents(sale.sale_amount), rule.lifetime_percent) / 100;
-    const taxRate = rule.tax_mode === 'deduct' ? Number(rule.tax_percent || 0) : 0, tax = calculator.percentageOf(calculator.cents(gross), taxRate) / 100;
+    const taxRate = rule.tax_mode === 'none' ? 0 : Number(rule.tax_percent || 0), tax = calculator.percentageOf(calculator.cents(gross), taxRate) / 100;
     receivables.push({ organization_id:user.organizationId, finance_sale_id:sale.id, entry_type:'lifetime', installment_number:null, competence:`${dueDate.slice(0,7)}-01`, due_date:dueDate, gross_amount:gross, tax_percent:taxRate, tax_amount:tax, net_amount:gross-tax });
   }
   let brokerRule = null, transfers = [];
   if (sale.seller_user_id) { const result = await supabase.from('finance_broker_rules').select('*,finance_broker_installments(*)').eq('organization_id', user.organizationId).eq('broker_user_id', sale.seller_user_id).eq('product_rule_id', rule.id).eq('active', true).maybeSingle(); fail(result.error); brokerRule = result.data; }
-  if (brokerRule) transfers = calculator.buildTransfers({ saleAmount: sale.sale_amount, firstDate, installments: brokerRule.finance_broker_installments.sort((a,b)=>a.installment_number-b.installment_number).map(item => ({ installmentNumber:item.installment_number, commissionPercent:item.commission_percent, monthOffset:item.month_offset })) }).map(item => ({ organization_id:user.organizationId, finance_sale_id:sale.id, broker_user_id:sale.seller_user_id, entry_type:item.entryType, installment_number:item.installmentNumber, commission_percent:item.commissionPercent, competence:item.competence, due_date:item.dueDate, expected_amount:item.expectedAmount }));
+  if (brokerRule && !firstTransferDate) throw Object.assign(new Error('Informe a primeira previsão de repasse.'), { statusCode:400 });
+  if (brokerRule) transfers = calculator.buildTransfers({ saleAmount: sale.sale_amount, firstDate:firstTransferDate, installments: brokerRule.finance_broker_installments.sort((a,b)=>a.installment_number-b.installment_number).map(item => ({ installmentNumber:item.installment_number, commissionPercent:item.commission_percent, monthOffset:item.month_offset })) }).map(item => ({ organization_id:user.organizationId, finance_sale_id:sale.id, broker_user_id:sale.seller_user_id, entry_type:item.entryType, installment_number:item.installmentNumber, commission_percent:item.commissionPercent, competence:item.competence, due_date:item.dueDate, expected_amount:item.expectedAmount }));
   if (brokerRule?.lifetime_enabled && Number(brokerRule.lifetime_percent) > 0) {
-    const dueDate = calculator.firstLifetimeDate(firstDate, brokerRule.finance_broker_installments.map((item,index)=>({monthOffset:item.month_offset ?? index})));
+    const dueDate = calculator.firstLifetimeDate(firstTransferDate, brokerRule.finance_broker_installments.map((item,index)=>({monthOffset:item.month_offset ?? index})));
     transfers.push({ organization_id:user.organizationId, finance_sale_id:sale.id, broker_user_id:sale.seller_user_id, entry_type:'lifetime', installment_number:null, commission_percent:Number(brokerRule.lifetime_percent), competence:`${dueDate.slice(0,7)}-01`, due_date:dueDate, expected_amount:calculator.percentageOf(calculator.cents(sale.sale_amount), brokerRule.lifetime_percent)/100 });
+  }
+  if (sale.status === 'scheduled') {
+    const paidReceivables = await supabase.from('finance_receivables').select('id').eq('finance_sale_id',sale.id).eq('organization_id',user.organizationId).eq('status','paid').limit(1); fail(paidReceivables.error);
+    const paidTransfers = await supabase.from('finance_transfers').select('id').eq('finance_sale_id',sale.id).eq('organization_id',user.organizationId).eq('status','paid').limit(1); fail(paidTransfers.error);
+    if (paidReceivables.data?.length || paidTransfers.data?.length) throw Object.assign(new Error('Não é possível alterar uma venda com pagamentos confirmados.'),{statusCode:409});
+    const removeReceivables = await supabase.from('finance_receivables').delete().eq('finance_sale_id',sale.id).eq('organization_id',user.organizationId); fail(removeReceivables.error);
+    const removeTransfers = await supabase.from('finance_transfers').delete().eq('finance_sale_id',sale.id).eq('organization_id',user.organizationId); fail(removeTransfers.error);
   }
   const recInsert = await supabase.from('finance_receivables').insert(receivables).select('*'); fail(recInsert.error);
   if (transfers.length) { const transferInsert = await supabase.from('finance_transfers').insert(transfers); if (transferInsert.error) { await supabase.from('finance_receivables').delete().eq('finance_sale_id', sale.id).eq('organization_id', user.organizationId); fail(transferInsert.error); } }
-  const updated = await supabase.from('finance_sales').update({ product_rule_id: rule.id, implantation_date: implantationDate, first_receivable_date: firstDate, rule_snapshot: rule, broker_rule_snapshot: brokerRule, status: 'scheduled' }).eq('id', sale.id).eq('organization_id', user.organizationId).select('*').single(); fail(updated.error);
-  await audit(user, 'sale', sale.id, 'scheduled', { receivables: receivables.length, transfers: transfers.length }); return updated.data;
+  const updated = await supabase.from('finance_sales').update({ product_rule_id: rule.id, implantation_date: implantationDate, first_receivable_date: firstDate, first_transfer_date:firstTransferDate, rule_snapshot: rule, broker_rule_snapshot: brokerRule, status: 'scheduled' }).eq('id', sale.id).eq('organization_id', user.organizationId).select('*').single(); fail(updated.error);
+  await audit(user, 'sale', sale.id, sale.status==='scheduled'?'rescheduled':'scheduled', { receivables: receivables.length, transfers: transfers.length, firstReceivableDate:firstDate, firstTransferDate }); return updated.data;
 }
 async function confirmPayment(user, table, id, body) {
   const current = await supabase.from(table).select('*').eq('id', id).eq('organization_id', user.organizationId).single(); fail(current.error);
@@ -116,4 +146,4 @@ async function confirmPayment(user, table, id, body) {
   await audit(user, table === 'finance_receivables' ? 'receivable' : 'transfer', id, 'paid', update); return result.data;
 }
 
-module.exports = { activate, confirmPayment, createBrokerRule, createProduct, listProducts, listSales, rows, scheduleSale, settings, syncClosings };
+module.exports = { activate, confirmPayment, createBrokerRule, createProduct, listBrokerRules, listProducts, listSales, rows, scheduleSale, settings, syncClosings, updateBrokerRule, updateProduct };
