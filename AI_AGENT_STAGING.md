@@ -1,5 +1,27 @@
 # Agente de IA — implantação somente em staging
 
+## Atualização Multirramos — 18/09/2026
+
+O atendimento de saúde e a interface compacta já foram homologados pelo
+proprietário. A migration original já foi aplicada. As instruções de primeira
+implantação abaixo são históricas: **não repetir migration, chaves ou pareamento**.
+
+Esta atualização exige apenas reimplantar o backend da branch staging no
+EasyPanel. O frontend habilita a seleção quando a API anuncia os dois tipos.
+O supervisor pausa, escolhe o roteiro, salva e reativa o agente.
+
+- Planos de saúde mantém o roteiro existente; contas antigas usam esse padrão.
+- Multirramos adapta o prompt do arquivo VSeg - Van IA (1).json: Auto,
+  Residencial, Consórcio, Viagem, Vida e Saúde, com perguntas e resumo por ramo.
+- Nome, corretora e destinatário substituem os nomes fixos do fluxo n8n.
+  Não há transferência automática para outra instância: o responsável recebe
+  o resumo e contata o lead pelo próprio WhatsApp.
+- Mesmo gpt-4o-mini, WhatsApp dedicado e regras de créditos. Um tipo ativo
+  por corretora. Conversas em andamento mantêm o roteiro anterior até concluir.
+- Tipo e estado ficam nos campos JSON existentes; nenhuma mudança de schema.
+- Validação automatizada com APIs simuladas; atendimento real multirramos ainda
+  depende da homologação do proprietário após o deploy.
+
 ## Escopo implementado
 
 Um agente por organização, acessível apenas ao supervisor. WhatsApp próprio, sem
@@ -27,7 +49,7 @@ O responsável entra em contato com o lead por conta própria.
   de créditos. Histórico enviado ao modelo limitado a 16.000 caracteres,
   entrada a 4.000 caracteres e geração a 1.500 tokens por resposta.
 
-## Implantação pendente
+## Primeira implantação — histórico já concluído
 
 1. Aplicar **somente** `supabase/migrations/20260919010000_supervisor_ai_agent.sql`
    no Supabase operacional de staging `hgqtanlzajogxrfbchrl`. Não executar o

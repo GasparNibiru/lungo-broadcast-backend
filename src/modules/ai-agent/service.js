@@ -19,10 +19,10 @@ function createService(db, env = process.env, fetcher = fetch) {
     const agent=await find(org), wallet=agent?await rpc('ai_wallet_refresh',{p_org:org,p_activate:false}):null;
     const events=agent?take(await db.from('ai_credit_events').select('id,kind,units,note,created_at').eq('organization_id',org).order('created_at',{ascending:false}).limit(30)):[];
     const pending=agent?take(await db.from('ai_jobs').select('id,state').eq('organization_id',org).in('state',['uncertain']).limit(1)):[];
-    return {agent:agent?{settings:agent.settings,enabled:agent.enabled}:null,wallet:d.walletView(wallet),events,needsReview:pending.length>0,readiness:readiness(),packages:d.PACKAGES,supportPhone:'5555992102864',model:d.MODEL};
+    return {agent:agent?{settings:{...agent.settings,agentType:d.agentType(agent.settings.agentType)},enabled:agent.enabled}:null,agentTypes:d.AGENT_TYPES,wallet:d.walletView(wallet),events,needsReview:pending.length>0,readiness:readiness(),packages:d.PACKAGES,supportPhone:'5555992102864',model:d.MODEL};
   }
   async function save(org,body) {
-    const config=d.settings(body),current=await find(org);
+    const current=await find(org),config=d.settings(body,current?.settings);
     if(current?.enabled) throw d.error('Pause o agente antes de editar sua configuração.',409);
     if(current) take(await db.from('ai_agents').update({settings:config,updated_at:new Date().toISOString()}).eq('organization_id',org));
     else take(await db.from('ai_agents').insert({organization_id:org,settings:config,instance_name:`lungo_ai_${env.APP_ENV==='staging'?'stg':'prd'}_${org.replace(/-/g,'')}`}));
@@ -64,15 +64,18 @@ function createService(db, env = process.env, fetcher = fetch) {
     const organization=take(await db.from('organizations').select('status').eq('id',org).maybeSingle());if(organization?.status!=='active')return;
     const wallet=await rpc('ai_wallet_refresh',{p_org:org,p_activate:false});
     if(!wallet || wallet.free_units+wallet.paid_units<1)return;
-    take(await db.from('ai_jobs').upsert({...incoming,organization_id:org},{onConflict:'organization_id,message_id',ignoreDuplicates:true}));
+    take(await db.from('ai_jobs').upsert({...incoming,organization_id:org,result:{requestedAgentType:d.agentType(agent.settings.agentType)}},{onConflict:'organization_id,message_id',ignoreDuplicates:true}));
   }
   async function generate(agent,conversation,job) {
-    const response=await fetcher('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${env.OPENAI_API_KEY}`,'Content-Type':'application/json'},signal:AbortSignal.timeout(45000),body:JSON.stringify({model:d.MODEL,store:false,temperature:0.3,max_completion_tokens:1500,response_format:d.responseFormat,messages:[{role:'system',content:d.prompt(agent.settings,conversation)},...d.contextMessages(conversation.history),{role:'user',content:job.input_text}]})});
+    const selected=d.conversationFor(agent.settings,conversation,job.result?.requestedAgentType||'health');
+    conversation=selected.conversation;
+    const config={...agent.settings,agentType:selected.type};
+    const response=await fetcher('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${env.OPENAI_API_KEY}`,'Content-Type':'application/json'},signal:AbortSignal.timeout(45000),body:JSON.stringify({model:d.MODEL,store:false,temperature:0.3,max_completion_tokens:1500,response_format:d.formatFor(selected.type),messages:[{role:'system',content:d.prompt(config,conversation)},...d.contextMessages(conversation.history),{role:'user',content:job.input_text}]})});
     if(!response.ok)throw d.error('Falha no serviço de IA.',502);
     const data=await response.json(),choice=data.choices?.[0];
     if(choice?.finish_reason!=='stop' || choice.message?.refusal)throw d.error('Resposta de IA indisponível.',502);
     let output;try{output=JSON.parse(choice.message.content);}catch{throw d.error('Resposta inválida do modelo.',502);}
-    return {...d.replyResult(output,conversation,agent.settings,job),usage:{model:d.MODEL,inputTokens:Number(data.usage?.prompt_tokens||0),outputTokens:Number(data.usage?.completion_tokens||0)}};
+    return {...d.replyResult(output,conversation,config,job),usage:{model:d.MODEL,inputTokens:Number(data.usage?.prompt_tokens||0),outputTokens:Number(data.usage?.completion_tokens||0)}};
   }
   async function tick() {
     if(Object.values(readiness()).some(v=>!v))return;

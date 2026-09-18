@@ -34,13 +34,14 @@ test('model context is bounded and excludes arbitrary roles',()=>{
 });
 test('worker bills confirmed replies, refunds generation failure and holds uncertain sends without retry',async()=>{
  const {createService}=require('../src/modules/ai-agent/service');
- for(const mode of ['success','ai-error','send-timeout','summary']){
+ for(const mode of ['success','multiramos','ai-error','send-timeout','summary']){
   const outcomes=[],requests=[],job={id:'44444444-4444-4444-8444-444444444444',organization_id:ORG,phone:'5511999998888',input_text:'Olá',kind:mode==='summary'?'summary':'reply'};
+  if(mode==='multiramos')job.result={requestedAgentType:'multiramos'};
   let claim=true,saved;
   const db={rpc:async(name,args)=>{if(name==='ai_claim_job'){const data=claim?job:null;claim=false;return{data};}if(name==='ai_finish_job'){outcomes.push(args.p_outcome);return{data:{}};}return{data:false};},from(table){
    const query={select(){return this;},eq(){return this;},update(value){saved=value;return this;},maybeSingle(){return this;},then(resolve,reject){return Promise.resolve({data:table==='ai_agents'?{enabled:true,instance_name:'dedicated',settings:{agentName:'Eduarda',companyName:'Teste',companyInfo:'Corretora',summaryPhone:'5511888887777'}}:table==='organizations'?{status:'active'}:table==='ai_jobs'?{id:job.id}:null}).then(resolve,reject);}};return query;
   }};
-  const fetcher=async(url,options)=>{requests.push({url,body:JSON.parse(options.body)});if(url.includes('api.openai.com')){if(mode==='ai-error')return{ok:false};return{ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({message:'Qual seu nome?',profile:Object.fromEntries(d.FIELDS.map(f=>[f,'não informado'])),handoff:false,explicitNewRequest:false})}}]})};}if(mode==='send-timeout')throw new Error('timeout');return{ok:true,json:async()=>({key:{id:'sent-123'}})};};
+  const fetcher=async(url,options)=>{requests.push({url,body:JSON.parse(options.body)});if(url.includes('api.openai.com')){if(mode==='ai-error')return{ok:false};return{ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({message:'Qual seu nome?',profile:mode==='multiramos'?{nome:'Ana',produto:'Seguro Auto',dados:[]}:Object.fromEntries(d.FIELDS.map(f=>[f,'não informado'])),handoff:false,explicitNewRequest:false})}}]})};}if(mode==='send-timeout')throw new Error('timeout');return{ok:true,json:async()=>({key:{id:'sent-123'}})};};
   const service=createService(db,{AI_AGENT_ENABLED:'true',OPENAI_API_KEY:'test',AI_AGENT_WEBHOOK_SECRET:'test',AI_AGENT_PUBLIC_URL:'https://example.invalid',EVOLUTION_BASE_URL:'https://evolution.invalid',EVOLUTION_API_KEY:'test'},fetcher);
   await service.tick();await service.tick();
   assert.deepEqual(outcomes,[mode==='ai-error'?'failed':mode==='send-timeout'?'uncertain':'sent']);
@@ -48,6 +49,7 @@ test('worker bills confirmed replies, refunds generation failure and holds uncer
   if(ai.length)assert.equal(ai[0].body.model,'gpt-4o-mini');
   const sends=requests.filter(x=>x.url.includes('/message/sendText/'));assert.equal(sends.length,mode==='ai-error'?0:1);
   if(mode==='success')assert.equal(saved.result.history.length,2);
+  if(mode==='multiramos'){assert.equal(saved.result.profile._agentType,'multiramos');assert.deepEqual(ai[0].body.response_format,d.formatFor('multiramos'));assert.match(ai[0].body.messages[0].content,/Seguro Auto/);}
  }
 });
 test('HTTP routes reject broker/anonymous access and derive tenant from authenticated supervisor',async()=>{
