@@ -30,7 +30,7 @@ function addMonths(value, months) {
 
 function buildReceivables({ saleAmount, firstDate, installments, taxMode = 'none', taxPercent = 0 }) {
   const base = cents(saleAmount);
-  const taxRate = taxMode === 'deduct' ? percent(taxPercent) : 0;
+  const taxRate = taxMode === 'none' ? 0 : percent(taxPercent);
   return installments.map((item, index) => {
     const gross = percentageOf(base, item.commissionPercent);
     const tax = percentageOf(gross, taxRate);

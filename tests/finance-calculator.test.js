@@ -17,6 +17,11 @@ test('broker transfers are independent and may precede receivables', () => {
   assert.equal(rows[0].dueDate, '2026-09-22');
 });
 
+test('records tax withheld by the operator in the net receivable', () => {
+  const [row] = buildReceivables({ saleAmount:1000, firstDate:'2026-10-20', installments:[{ commissionPercent:100 }], taxMode:'withheld', taxPercent:6 });
+  assert.deepEqual([row.grossAmount,row.taxAmount,row.netAmount],[1000,60,940]);
+});
+
 test('month arithmetic keeps dates valid at month end', () => {
   assert.equal(addMonths('2026-01-31', 1), '2026-02-28');
   assert.equal(addMonths('2028-01-31', 1), '2028-02-29');
