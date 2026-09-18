@@ -138,6 +138,25 @@ function buildEvolutionUrl(template, instanceName) {
     .replace('{instance}', encoded);
   return `${base}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 }
+const CONNECT_MESSAGE = 'Conecte seu WhatsApp à plataforma em Meus dados antes de agendar mensagens.';
+async function requireConnected(instanceName) {
+  if (!clean(instanceName) || !evolutionBaseUrl() || !process.env.EVOLUTION_API_KEY) throw Object.assign(new Error(CONNECT_MESSAGE), { statusCode: 409 });
+  let response;
+  try { response = await axios.get(buildEvolutionUrl(process.env.EVOLUTION_CONNECTION_PATH || '/instance/connectionState/:instanceName', instanceName), { headers: evolutionHeaders(), timeout: 10000, validateStatus: () => true }); }
+  catch { throw Object.assign(new Error('Não foi possível verificar seu WhatsApp. Confira a conexão em Meus dados e tente novamente.'), { statusCode: 503 }); }
+  if (response.status === 404) throw Object.assign(new Error(CONNECT_MESSAGE), { statusCode: 409 });
+  if (response.status < 200 || response.status >= 300) throw Object.assign(new Error('Não foi possível verificar seu WhatsApp. Confira a conexão em Meus dados e tente novamente.'), { statusCode: 503 });
+  const state = clean(response.data?.instance?.state || response.data?.state || response.data?.connectionState).toLowerCase();
+  if (!['open','connected'].includes(state)) throw Object.assign(new Error(CONNECT_MESSAGE), { statusCode: 409 });
+}
+async function requireScheduling(client) {
+  if (String(process.env.SCHEDULED_FOLLOWUPS_DISABLED || '').toLowerCase() === 'true') throw Object.assign(new Error('O envio programado está indisponível neste ambiente.'), { statusCode: 503 });
+  await requireConnected(client.instanceName);
+}
+async function availabilityRoute(req, res) {
+  try { const client = requireClient(req); await requireScheduling(client); return send(res, 200, { ok: true, connected: true }); }
+  catch (error) { return send(res, error.statusCode || 500, { ok: false, error: error.message }); }
+}
 function renderMessage(template, item) {
   return clean(template)
     .replace(/\{nome\}/gi, clean(item.nome || ''))
@@ -145,6 +164,7 @@ function renderMessage(template, item) {
 }
 async function sendWhatsapp(instanceName, phone, text) {
   if (!evolutionBaseUrl() || !process.env.EVOLUTION_API_KEY) throw new Error('Evolution não configurada para mensagens programadas.');
+  await requireConnected(instanceName);
   const number = normalizePhone(phone);
   if (!number || number.length < 10) throw new Error('Telefone inválido para mensagem programada.');
   const url = buildEvolutionUrl(process.env.EVOLUTION_SEND_TEXT_PATH || '/message/sendText/:instanceName', instanceName);
@@ -231,6 +251,7 @@ async function scheduleLeadRoute(req, res) {
   try {
     const body = await readBody(req);
     const client = requireClient(req, body);
+    await requireScheduling(client);
     const id = clean(req.params?.id || '');
     const leads = loadArray(LEADS_FILE);
     const index = leads.findIndex((lead) => lead.id === id && clean(lead.instanceName) === clean(client.instanceName));
@@ -263,6 +284,7 @@ async function scheduleClientRoute(req, res) {
   try {
     const body = await readBody(req);
     const client = requireClient(req, body);
+    await requireScheduling(client);
     const id = clean(req.params?.id || '');
     const items = loadArray(CUSTOMER_CLIENTS_FILE);
     const index = items.findIndex((item) => item.id === id && clean(item.instanceName) === clean(client.instanceName));
@@ -278,6 +300,8 @@ function register(app) {
   registered = true;
   app.options('/api/scheduled/leads/:id', (req, res) => send(res, 204, {}));
   app.options('/api/scheduled/clientes/:id', (req, res) => send(res, 204, {}));
+  app.options('/api/scheduled/availability', (req, res) => send(res, 204, {}));
+  app.get('/api/scheduled/availability', availabilityRoute);
   app.options('/api/scheduled/health', (req, res) => send(res, 204, {}));
   app.get('/api/scheduled/health', (req, res) => send(res, 200, { ok: true, module: 'scheduled-followups', version: VERSION, intervalMs: INTERVAL_MS, maxPerTick: MAX_PER_TICK, disabled: String(process.env.SCHEDULED_FOLLOWUPS_DISABLED || '').toLowerCase() === 'true', time: new Date().toISOString() }));
   app.post('/api/scheduled/leads/:id', scheduleLeadRoute);
