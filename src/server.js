@@ -90,6 +90,7 @@ app.use(prospectingRouter);
 app.use(supervisorFinanceRouter);
 app.use(aiAgent.router);
 app.use(require('./routes/daily-assistant'));
+app.use(require('./routes/notifications'));
 
 const upload = multer({
   storage: multer.diskStorage({
