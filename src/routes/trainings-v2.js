@@ -59,3 +59,5 @@ router.delete('/api/admin/training-center/:id', requireAdmin, (req, res) => { co
 router.get('/api/admin/training-center/:id/metrics', requireAdmin, async (req, res) => { const training = load().find((item) => item.id === req.params.id && origin(item) === 'admin'); if (!training) return res.status(404).json({ ok: false, error: 'Treinamento nao encontrado.' }); res.json({ ok: true, training: { id: training.id, title: training.title }, viewers: await metricsFor(training) }); });
 
 module.exports = router;
+
+module.exports.notificationTrainings = user => load().filter(item => visibleTo(item, user)).map(({id,title,track,createdAt,updatedAt}) => ({id,title,track,createdAt,updatedAt}));
