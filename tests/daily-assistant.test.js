@@ -15,3 +15,10 @@ test('assistant keeps credentials server side, bounds cost, isolates users and h
  const failed=createAssistant({env:{OPENAI_API_KEY:'secret'},fetcher:async()=>{throw Error('secret');}});
  await assert.rejects(failed(user,{message:'Ajuda'}),e=>e.statusCode===502&&!e.message.includes('secret'));
 });
+
+test('model receives only server context and handles a failed lookup without invented totals',async()=>{
+ for(const broken of [false,true]){
+ const chat=createAssistant({env:{OPENAI_API_KEY:'key'},contextLoader:async authenticated=>{assert.equal(authenticated,user);if(broken)throw Error('private database failure');return {sales:{highest:[{client:'Real sale',amount:8000}]}};},fetcher:async(url,options)=>{const payload=JSON.parse(options.body),context=JSON.parse(payload.messages[1].content.split(': ').slice(1).join(': '));assert.equal(context.unavailable,broken?true:undefined);if(!broken)assert.equal(context.sales.highest[0].amount,8000);assert.ok(!JSON.stringify(payload).includes('Forged'));return {ok:true,json:async()=>({choices:[{message:{content:'Resposta'}}]})};}});
+ await chat(user,{message:'Maior contrato?',context:{client:'Forged'}});
+ }
+});
