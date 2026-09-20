@@ -109,6 +109,18 @@ async function sendRecruitmentRejectionEmail({ email, name, organizationName, va
   return { sent: true, recipient: email, messageId: data?.data?.messageId || null, provider: 'zoho-oauth' };
 }
 
+async function sendRecruitmentDismissalEmail({ email, name, organizationName, vacancyTitle, message }) {
+  const fromEmail = required('ZOHO_FROM_EMAIL'); required('ZOHO_FROM_NAME');
+  const safeName = escapeHtml(name), safeOrganization = escapeHtml(organizationName || 'Lungo Corretores'), safeVacancy = escapeHtml(vacancyTitle || 'processo seletivo');
+  const safeMessage = escapeHtml('Agradecemos sua dedicação e o tempo em que esteve conosco. Após a avaliação da equipe responsável, entendemos que os resultados ficaram abaixo do desempenho esperado para a continuidade nesta oportunidade. Por isso, estamos encerrando sua participação na equipe e seu acesso à plataforma. Essa decisão não diminui o valor da sua trajetória. Desejamos sucesso em seus próximos projetos. Se precisar de esclarecimentos, entre em contato com a sua corretora.').replace(/\n/g, '<br>');
+  const content = `<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f3f6f8;font-family:Arial,sans-serif;color:#17212b"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:28px 12px"><tr><td align="center"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fff;border:1px solid #dfe7eb;border-radius:16px;overflow:hidden"><tr><td style="padding:22px 24px;background:#101820;color:#fff;text-align:center"><img src="https://imagensconrato.pagecor.com.br/logo-lungo.png" width="112" alt="Lungo Corretores"></td></tr><tr><td style="padding:28px"><h1 style="margin:0 0 14px;font-size:22px">Olá, ${safeName}!</h1><p style="line-height:1.55;color:#52616b">A equipe da ${safeOrganization} tem uma atualização sobre sua participação.</p><p style="line-height:1.65;color:#52616b">${safeMessage}</p></td></tr></table></td></tr></table></body></html>`;
+  const payload = { fromAddress: fromEmail, toAddress: email, subject: `Encerramento da participação e do acesso — ${organizationName || 'Lungo'}`, content, mailFormat: 'html', encoding: 'UTF-8' };
+  let accessToken = await getAccessToken(), accountId = await getAccountId(accessToken), data;
+  const send = () => zohoRequest(`https://mail.zoho.com/api/accounts/${encodeURIComponent(accountId)}/messages`, { method: 'POST', headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  try { data = await send(); } catch (error) { if (error.status !== 401) throw error; accessToken = await getAccessToken(true); accountIdCache = null; accountId = await getAccountId(accessToken); data = await send(); }
+  return { sent: true, recipient: email, messageId: data?.data?.messageId || null, provider: 'zoho-oauth' };
+}
+
 async function sendTrainingNotificationEmail({ email, name, trainingTitle, track, publisherName, organizationName }) {
   const fromEmail = required('ZOHO_FROM_EMAIL'); required('ZOHO_FROM_NAME');
   const defaultAccessUrl = process.env.NODE_ENV === 'staging' ? 'https://staging-crm.lungocorretores.com.br/' : 'https://crm.lungocorretores.com.br/';
@@ -123,4 +135,4 @@ async function sendTrainingNotificationEmail({ email, name, trainingTitle, track
   return { sent: true, recipient: email, messageId: data?.data?.messageId || null, provider: 'zoho-oauth' };
 }
 
-module.exports = { sendAccessEmail, sendRecruitmentEmail, sendRecruitmentRejectionEmail, sendTrainingNotificationEmail };
+module.exports = { sendRecruitmentDismissalEmail, sendAccessEmail, sendRecruitmentEmail, sendRecruitmentRejectionEmail, sendTrainingNotificationEmail };
