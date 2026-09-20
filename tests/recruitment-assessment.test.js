@@ -13,6 +13,8 @@ test('versioned completion preserves existing tests, requires commercial answers
  const hash=t=>crypto.createHash('sha256').update(t).digest('hex');
  fs.writeFileSync(file,JSON.stringify({vacancies:[],candidates:[{id:'pending',organizationId:'org',stage:'teste_enviado',email:'old@example.com',disc:{}},{id:'old',organizationId:'org',disc:{tokenHash:hash('old')}},{id:'new',organizationId:'org',disc:{tokenHash:hash('new'),assessmentVersion:2}},{id:'foreign',organizationId:'other',disc:{}}]}));
  const authPath=require.resolve('../src/middleware/require-access'),routePath=require.resolve('../src/routes/recruitment'),oldAuth=require.cache[authPath],oldRoute=require.cache[routePath];
+ const mailPath=require.resolve('../src/services/access-email'),oldMail=require.cache[mailPath]; let releaseMail;
+ require.cache[mailPath]={id:mailPath,filename:mailPath,loaded:true,exports:{sendRecruitmentEmail:()=>new Promise(resolve=>{releaseMail=()=>resolve({messageId:'mock'});})}};
  require.cache[authPath]={id:authPath,filename:authPath,loaded:true,exports:{requireAccess:()=> (req,res,next)=>{req.accessUser={id:'s',organizationId:'org',role:'supervisor'};next();}}};delete require.cache[routePath];
  const app=express();app.use(express.json());app.use(require(routePath));const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base='http://127.0.0.1:'+server.address().port;
  const answers=Array.from({length:12},()=>({most:0,least:1}));const post=(token,body)=>fetch(base+'/api/public/recruitment/disc/'+token+'/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -27,6 +29,7 @@ test('versioned completion preserves existing tests, requires commercial answers
  assert.equal((await update({hiredUserId:'broker'})).status,409);
  assert.equal((await update({stage:'aprovado',hirePending:true})).status,200);
  let hire=JSON.parse(fs.readFileSync(file)).candidates[0];assert.ok(hire.approvedAt);assert.equal(hire.accessGrantedAt,undefined);
+ assert.equal((await update({stage:'entrevista'})).status,200);
  assert.equal((await patchEmail('pending','corrigido@example.com')).status,200);
  assert.equal(JSON.parse(fs.readFileSync(file)).candidates[0].email,'corrigido@example.com');
  assert.equal((await update({hiredUserId:'broker',hirePending:false})).status,200);
@@ -38,6 +41,11 @@ test('versioned completion preserves existing tests, requires commercial answers
  const publicTest=await (await fetch(base+'/api/public/recruitment/disc/new')).json();assert.equal(publicTest.assessmentVersion,2);assert.equal(publicTest.commercialQuestions.length,8);
  assert.equal((await post('new',{answers,assessmentVersion:2,commercialAnswers:[1,2,0,3,1,2,0,3]})).status,200);assert.equal((await post('new',{answers})).status,410);
  const saved=JSON.parse(fs.readFileSync(file));saved.candidates.shift();assert.equal(saved.candidates[0].disc.result.commercial,undefined);assert.equal(saved.candidates[1].disc.result.commercial.score,100);assert.equal(saved.candidates[1].stage,'teste_realizado');assert.equal(saved.candidates[1].seenAt,null);
+ const latest=JSON.parse(fs.readFileSync(file));latest.candidates.push({id:'mail',organizationId:'org',stage:'novo',email:'mail@example.com',updatedAt:'before'});fs.writeFileSync(file,JSON.stringify(latest));
+ const sending=fetch(base+'/api/supervisor/recruitment/candidates/mail/disc/send',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+ while(!releaseMail) await new Promise(resolve=>setImmediate(resolve));
+ assert.equal((await fetch(base+'/api/supervisor/recruitment/candidates/mail',{method:'DELETE'})).status,200);
+ releaseMail();assert.equal((await sending).status,409);assert.ok(!JSON.parse(fs.readFileSync(file)).candidates.some(c=>c.id==='mail'));
  const response=await fetch(base+'/api/supervisor/recruitment/candidates/foreign',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({seen:true})});assert.equal(response.status,404);
- }finally{await new Promise(r=>server.close(r));if(oldAuth)require.cache[authPath]=oldAuth;else delete require.cache[authPath];if(oldRoute)require.cache[routePath]=oldRoute;else delete require.cache[routePath];if(oldEnv===undefined)delete process.env.RECRUITMENT_FILE_PATH;else process.env.RECRUITMENT_FILE_PATH=oldEnv;fs.rmSync(dir,{recursive:true,force:true});}
+ }finally{if(oldMail)require.cache[mailPath]=oldMail;else delete require.cache[mailPath];await new Promise(r=>server.close(r));if(oldAuth)require.cache[authPath]=oldAuth;else delete require.cache[authPath];if(oldRoute)require.cache[routePath]=oldRoute;else delete require.cache[routePath];if(oldEnv===undefined)delete process.env.RECRUITMENT_FILE_PATH;else process.env.RECRUITMENT_FILE_PATH=oldEnv;fs.rmSync(dir,{recursive:true,force:true});}
 });
