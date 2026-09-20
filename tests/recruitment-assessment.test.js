@@ -27,7 +27,10 @@ test('versioned completion preserves existing tests, requires commercial answers
  assert.equal((await update({hiredUserId:'broker'})).status,409);
  assert.equal((await update({stage:'aprovado',hirePending:true})).status,200);
  let hire=JSON.parse(fs.readFileSync(file)).candidates[0];assert.ok(hire.approvedAt);assert.equal(hire.accessGrantedAt,undefined);
+ assert.equal((await patchEmail('pending','corrigido@example.com')).status,200);
+ assert.equal(JSON.parse(fs.readFileSync(file)).candidates[0].email,'corrigido@example.com');
  assert.equal((await update({hiredUserId:'broker',hirePending:false})).status,200);
+ assert.equal((await patchEmail('pending','blocked@example.com')).status,409);
  hire=JSON.parse(fs.readFileSync(file)).candidates[0];assert.ok(hire.accessGrantedAt);assert.equal(hire.hirePending,false);
  const granted=hire.accessGrantedAt;await update({seen:true});assert.equal(JSON.parse(fs.readFileSync(file)).candidates[0].accessGrantedAt,granted);
 
