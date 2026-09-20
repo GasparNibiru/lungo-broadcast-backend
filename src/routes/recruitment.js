@@ -6,6 +6,7 @@ const { requireAccess } = require('../middleware/require-access');
 const { sendRecruitmentEmail, sendRecruitmentRejectionEmail } = require('../services/access-email');
 
 const router = express.Router();
+const {scoreCommercial,publicQuestions}=require('../services/recruitment-assessment');
 const FILE = process.env.RECRUITMENT_FILE_PATH || (process.env.NODE_ENV === 'staging' ? '/data-staging/recruitment.json' : path.resolve(__dirname, '../../data/recruitment.json'));
 const STAGES = new Set(['novo', 'teste_enviado', 'teste_realizado', 'triagem', 'contato', 'entrevista', 'aprovado', 'recusado']);
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -45,7 +46,7 @@ router.post('/api/supervisor/recruitment/candidates/:id/disc/send', requireAcces
   const token = crypto.randomBytes(32).toString('base64url'), testUrl = `${publicFrontendUrl()}?token=${encodeURIComponent(token)}`, now = new Date().toISOString();
   try {
     const delivery = await sendRecruitmentEmail({ email: item.email, name: item.name, organizationName: vacancy.companyName || req.accessUser.organization?.name, vacancyTitle: vacancy.title, testUrl });
-    item.disc = { tokenHash: tokenHash(token), sentAt: now, completedAt: null, emailSent: true, messageId: delivery.messageId || null, result: null };
+    item.disc = { assessmentVersion: 2, tokenHash: tokenHash(token), sentAt: now, completedAt: null, emailSent: true, messageId: delivery.messageId || null, result: null };
     item.stage = 'teste_enviado'; item.updatedAt = now; save(data);
     return res.json({ ok: true, sent: true, recipient: item.email, previewUrl: testUrl });
   } catch (error) { console.error('Recruitment DISC email failed:', error.message); return res.status(502).json({ ok: false, error: 'Não foi possível enviar o e-mail do teste. Verifique a configuração do e-mail.' }); }
@@ -65,7 +66,7 @@ router.get('/api/public/recruitment/disc/:token', (req, res) => {
   if (!item) return res.status(404).json({ ok: false, error: 'Este link é inválido ou foi descontinuado.' });
   if (item.disc?.completedAt) return res.status(410).json({ ok: false, completed: true, error: 'Esta avaliação já foi finalizada. Você pode fechar esta página.' });
   const vacancy = data.vacancies.find((value) => value.slug === item.vacancySlug);
-  return res.json({ ok: true, candidate: { name: item.name }, vacancy: { title: vacancy?.title || 'Consultor comercial', companyName: vacancy?.companyName || 'Lungo Corretores', logo: vacancy?.logo || '' } });
+  return res.json({ ok: true, assessmentVersion:item.disc.assessmentVersion||1, commercialQuestions:item.disc.assessmentVersion===2?publicQuestions():[], candidate: { name: item.name }, vacancy: { title: vacancy?.title || 'Consultor comercial', companyName: vacancy?.companyName || 'Lungo Corretores', logo: vacancy?.logo || '' } });
 });
 
 router.post('/api/public/recruitment/disc/:token/complete', (req, res) => {
@@ -74,7 +75,9 @@ router.post('/api/public/recruitment/disc/:token/complete', (req, res) => {
   if (item.disc?.completedAt) return res.status(410).json({ ok: false, completed: true, error: 'Esta avaliação já foi finalizada.' });
   const answers = req.body?.answers;
   if (!Array.isArray(answers) || answers.length !== 12 || answers.some((answer) => !answer || !Number.isInteger(answer.most) || !Number.isInteger(answer.least) || answer.most < 0 || answer.most > 3 || answer.least < 0 || answer.least > 3 || answer.most === answer.least)) return res.status(400).json({ ok: false, error: 'Selecione uma opção diferente em Sou mais e Sou menos em todas as situações.' });
-  const now = new Date().toISOString(); item.disc.result = scoreDisc(answers); item.disc.completedAt = now; item.stage = 'teste_realizado'; item.seenAt = null; item.updatedAt = now; save(data);
+  let commercial=null;
+  if(item.disc.assessmentVersion===2){if(req.body.assessmentVersion!==2)return res.status(400).json({ok:false,error:'Atualize a página para carregar a avaliação completa.'});try{commercial=scoreCommercial(req.body.commercialAnswers);}catch(error){return res.status(400).json({ok:false,error:error.message});}}
+  const now = new Date().toISOString(); item.disc.result = scoreDisc(answers); if(commercial){item.disc.result.discMatch=item.disc.result.match;item.disc.result.match=commercial.score;item.disc.result.commercial=commercial;} item.disc.completedAt = now; item.stage = 'teste_realizado'; item.seenAt = null; item.updatedAt = now; save(data);
   return res.json({ ok: true, completed: true });
 });
 
