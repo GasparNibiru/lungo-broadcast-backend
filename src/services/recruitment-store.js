@@ -9,6 +9,10 @@ function legacyMatch(candidate, broker) {
 }
 function reconcile(organizationId, brokers) {
   const data=load(); let changed=false;
+  for (const c of data.candidates.filter(c=>c.organizationId===organizationId && c.hiredUserId && !c.dismissedAt)) {
+    const broker=brokers.find(b=>b.id===c.hiredUserId);if(!broker)continue;
+    for(const field of ['name','email','phone'])if(broker[field]!==undefined && c[field]!==broker[field]){c[field]=broker[field];changed=true;}
+  }
   for(const broker of brokers.filter(b=>b.tokenActive)) {
     const scoped=data.candidates.filter(c=>c.organizationId===organizationId);
     if(scoped.some(c=>c.hiredUserId===broker.id)) continue;

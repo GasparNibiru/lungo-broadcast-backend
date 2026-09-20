@@ -7,6 +7,7 @@ test('reconcile legacy granted access and remove linked recruitment only inside 
  const candidate={id:'c',organizationId:'org',name:'Maria',email:'m@example.com',hirePending:true,stage:'aprovado'};
  store.save({vacancies:[],candidates:[candidate,{...candidate,id:'foreign',organizationId:'other'}]});
  store.reconcile('org',[broker]);let data=store.load();assert.equal(data.candidates[0].hiredUserId,'b');assert.equal(data.candidates[0].hirePending,false);assert.equal(data.candidates[0].accessGrantedAt,broker.createdAt);assert.equal(data.candidates[1].hiredUserId,undefined);
+ store.reconcile('org',[{...broker,email:'updated@example.com',tokenActive:false}]);assert.equal(store.load().candidates[0].email,'updated@example.com');assert.equal(store.load().candidates[1].email,'m@example.com');
  store.removeBroker('org',broker);assert.equal(store.load().candidates.length,2);assert.ok(store.load().candidates[0].accessRemovedAt);assert.equal(store.load().candidates[0].dismissedAt,undefined);
  store.save({vacancies:[],candidates:[candidate]});store.removeBroker('org',broker);assert.equal(store.load().candidates.length,1);assert.equal(store.load().candidates[0].hiredUserId,'b');
  store.save({vacancies:[],candidates:[{...candidate,dismissedAt:'2026-09-20',phone:'11999999999'}]});assert.equal(store.blocked(store.load(),'org','M@example.com',''),true);assert.equal(store.blocked(store.load(),'org','','(11) 99999-9999'),true);assert.equal(store.blocked(store.load(),'other','m@example.com','11999999999'),false);
