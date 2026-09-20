@@ -45,6 +45,11 @@ router.post('/api/supervisor/recruitment/candidates/:id/dismiss', requireAccess(
   let data=load(),item=data.candidates.find(c=>c.organizationId===org&&c.id===req.params.id);
   if(!item)return res.status(404).json({ok:false,error:'Candidato não encontrado.'});
   if(!item.hiredUserId)return res.status(409).json({ok:false,error:'O candidato ainda não recebeu acesso.'});
+  if(!item.dismissedAt) {
+   const broker=await require('../services/supervisor').organizationBroker(org,item.hiredUserId);
+   require('../services/recruitment-store').reconcile(org,[broker]);
+   data=load();item=data.candidates.find(c=>c.organizationId===org&&c.id===req.params.id);
+  }
   if(!EMAIL.test(item.email||''))return res.status(400).json({ok:false,error:'Corrija o e-mail antes do desligamento.'});
   if(!item.dismissedAt) {
    await require('../services/supervisor').archiveSupervisorBroker(org,item.hiredUserId);

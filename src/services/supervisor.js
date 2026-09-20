@@ -120,7 +120,10 @@ async function resendSupervisorBrokerEmail(organizationId, userId) {
 
 async function updateSupervisorBroker(organizationId, userId, input) {
   await organizationBroker(organizationId, userId);
-  return updateAdminAccess(userId, { ...input, role: 'broker' });
+  const result = await updateAdminAccess(userId, { ...input, role: 'broker' });
+  const broker = await organizationBroker(organizationId, userId);
+  require('./recruitment-store').reconcile(organizationId, [broker]);
+  return result;
 }
 
 async function changeSupervisorBroker(organizationId, userId, action) {
@@ -211,4 +214,4 @@ async function listSupervisorOperationalCustomers(organizationId, supervisorUser
   catch (error) { throw databaseError('list operational customers', error); }
 }
 
-module.exports = { getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateOrganizationBranding, updateOwnProfile, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };
+module.exports = { organizationBroker, getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateOrganizationBranding, updateOwnProfile, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };
