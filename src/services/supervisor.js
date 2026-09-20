@@ -129,8 +129,9 @@ async function changeSupervisorBroker(organizationId, userId, action) {
 }
 
 async function archiveSupervisorBroker(organizationId, userId) {
-  await organizationBroker(organizationId, userId);
+  const broker = await organizationBroker(organizationId, userId);
   const archived = await archiveAdminAccess(userId);
+  require('./recruitment-store').removeBroker(organizationId, broker);
   await legacyBrokerAccess.deactivate(userId);
   return archived;
 }
