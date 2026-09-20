@@ -22,6 +22,12 @@ function reconcile(organizationId, brokers) {
     if(broker.createdAt)c.accessGrantedAt ||= broker.createdAt;
     c.updatedAt=new Date().toISOString(); changed=true;
   }
+  for (const broker of brokers.filter(b=>b.status==='active')) {
+    if(data.candidates.some(c=>c.organizationId===organizationId && c.hiredUserId===broker.id))continue;
+    const now=new Date().toISOString();
+    data.candidates.push({id:require('crypto').randomUUID(),organizationId,source:'broker_registry',name:broker.name,email:broker.email||'',phone:broker.phone||'',hiredUserId:broker.id,hirePending:false,stage:'aprovado',createdAt:broker.createdAt||now,accessGrantedAt:broker.createdAt||null,approvedAt:null,seenAt:now,updatedAt:now});
+    changed=true;
+  }
   if(changed)save(data);
 }
 function removeBroker(organizationId, broker) {

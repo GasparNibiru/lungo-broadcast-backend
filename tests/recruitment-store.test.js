@@ -13,5 +13,11 @@ test('reconcile legacy granted access and remove linked recruitment only inside 
  store.save({vacancies:[],candidates:[{...candidate,dismissedAt:'2026-09-20',phone:'11999999999'}]});assert.equal(store.blocked(store.load(),'org','M@example.com',''),true);assert.equal(store.blocked(store.load(),'org','','(11) 99999-9999'),true);assert.equal(store.blocked(store.load(),'other','m@example.com','11999999999'),false);
  store.save({vacancies:[],candidates:[candidate,{...candidate,id:'duplicate'}]});store.reconcile('org',[broker]);assert.ok(store.load().candidates.every(c=>!c.hiredUserId));
  store.removeBroker('org',broker);assert.equal(store.load().candidates.length,2);
+ store.save({vacancies:[],candidates:[]});
+ const direct={...broker,id:'direct',status:'active',tokenActive:false};
+ store.reconcile('org',[direct,{...direct,id:'blocked',status:'blocked'}]);
+ let rows=store.load().candidates;assert.equal(rows.length,1);assert.equal(rows[0].source,'broker_registry');assert.equal(rows[0].hiredUserId,'direct');assert.equal(rows[0].approvedAt,null);
+ store.reconcile('org',[direct]);assert.equal(store.load().candidates.length,1);
+ rows=store.load();rows.candidates[0].dismissedAt='2026-09-20';store.save(rows);store.reconcile('org',[direct]);assert.equal(store.load().candidates.length,1);assert.ok(store.load().candidates[0].dismissedAt);
  }finally {if(old===undefined)delete process.env.RECRUITMENT_FILE_PATH;else process.env.RECRUITMENT_FILE_PATH=old;fs.rmSync(dir,{recursive:true,force:true});}
 });
