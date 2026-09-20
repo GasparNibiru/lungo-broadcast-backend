@@ -23,6 +23,14 @@ test('versioned completion preserves existing tests, requires commercial answers
  assert.equal((await patchEmail('pending',' new@example.com ')).status,200);
  assert.equal(JSON.parse(fs.readFileSync(file)).candidates[0].email,'new@example.com');
  assert.equal((await patchEmail('old','new@example.com')).status,409);
+ const update=body=>fetch(base+'/api/supervisor/recruitment/candidates/pending',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await update({hiredUserId:'broker'})).status,409);
+ assert.equal((await update({stage:'aprovado',hirePending:true})).status,200);
+ let hire=JSON.parse(fs.readFileSync(file)).candidates[0];assert.ok(hire.approvedAt);assert.equal(hire.accessGrantedAt,undefined);
+ assert.equal((await update({hiredUserId:'broker',hirePending:false})).status,200);
+ hire=JSON.parse(fs.readFileSync(file)).candidates[0];assert.ok(hire.accessGrantedAt);assert.equal(hire.hirePending,false);
+ const granted=hire.accessGrantedAt;await update({seen:true});assert.equal(JSON.parse(fs.readFileSync(file)).candidates[0].accessGrantedAt,granted);
+
  assert.equal((await post('old',{answers})).status,200);assert.equal((await post('new',{answers})).status,400);
  const publicTest=await (await fetch(base+'/api/public/recruitment/disc/new')).json();assert.equal(publicTest.assessmentVersion,2);assert.equal(publicTest.commercialQuestions.length,8);
  assert.equal((await post('new',{answers,assessmentVersion:2,commercialAnswers:[1,2,0,3,1,2,0,3]})).status,200);assert.equal((await post('new',{answers})).status,410);
