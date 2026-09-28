@@ -4,6 +4,7 @@ const { requireAccess } = require('../middleware/require-access');
 const { createService } = require('../modules/prospecting/service');
 function createProspectingRouter({ service = createService(), auth = requireAccess(['broker','supervisor']) } = {}) {
   const router = express.Router();
+  router.use(require('./prospecting-admin').createAdminRouter());
   router.use('/api/prospecting', (req, res, next) => { res.set('Cache-Control', 'private, no-store'); res.set('Vary', 'x-access-token, Authorization'); next(); }, auth);
   const handler = action => async (req, res) => {
     try {
