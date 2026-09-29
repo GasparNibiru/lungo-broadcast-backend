@@ -19,7 +19,7 @@ const adapter = {
   from(table) {
     assert(['users','prospecting_wallets','prospecting_token_movements'].includes(table));
     const filters = []; let start = 0, end = 9999, single = false;
-    const q = { select(){return q;}, eq(k,v){filters.push(r=>r[k]===v);return q;}, in(k,vs){filters.push(r=>vs.includes(r[k]));return q;}, order(){return q;}, range(a,b){start=a;end=b;return q;}, maybeSingle(){single=true;return q;},
+    const q = { select(fields){if(table==='users') assert(fields.includes('organizations!users_organization_id_fkey(name,status)'));return q;}, eq(k,v){filters.push(r=>r[k]===v);return q;}, in(k,vs){filters.push(r=>vs.includes(r[k]));return q;}, order(){return q;}, range(a,b){start=a;end=b;return q;}, maybeSingle(){single=true;return q;},
       async then(resolve,reject) { try {
         let rows = (await db.query(table === 'users' ? "SELECT u.*, 'Pessoa Teste' AS name, 'teste@example.com' AS email, jsonb_build_object('name','Corretora','status',o.status) AS organizations FROM users u JOIN organizations o ON o.id=u.organization_id" : `SELECT * FROM ${table}`)).rows;
         rows=rows.filter(r=>filters.every(f=>f(r)));const count=rows.length;rows=rows.slice(start,end+1);resolve({data:single?rows[0]||null:rows,count});
@@ -47,6 +47,24 @@ test('list and detail do not initialize wallets or renew free credits',async()=>
   assert.equal((await service.detail(id)).wallet,null);
   assert.equal((await db.query('SELECT count(*)::int AS n FROM prospecting_wallets')).rows[0].n,0);
   assert.equal(calls.length,0);
+});
+test('default admin connection uses staging client and rejects other databases', async()=>{
+  const modulePath=require.resolve('../src/database/supabase');
+  const previousModule=require.cache[modulePath], previousUrl=process.env.SUPABASE_URL;
+  require.cache[modulePath]={id:modulePath,filename:modulePath,loaded:true,exports:adapter};
+  try {
+    process.env.SUPABASE_URL='https://hgqtanlzajogxrfbchrl.supabase.co';
+    const realService=createAdminService();
+    const list=await realService.list();assert.equal(list.users[0].id,id);
+    assert.equal((await realService.detail(id)).user.id,id);
+    for(const project of ['bnceclhjhgjfirubudwi','fmktrtyahaudefcymrvm']) {
+      process.env.SUPABASE_URL=`https://${project}.supabase.co`;
+      await assert.rejects(realService.list(),/prospecting_operational_project_not_authorized/);
+    }
+  } finally {
+    if(previousModule) require.cache[modulePath]=previousModule; else delete require.cache[modulePath];
+    if(previousUrl===undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL=previousUrl;
+  }
 });
 test('invalid amounts, reasons, users and pages cannot write credits',async()=>{
   const body={amount:10,reason:'Teste',requestId:randomUUID()};
