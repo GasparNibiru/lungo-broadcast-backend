@@ -173,4 +173,4 @@ function createService({ getOperational = operationalClient, getCatalog = getBus
     }
   };
 }
-module.exports = { createService, parseFilters, applyFilters, SOURCE_VERSION, assertOperationalTarget };
+module.exports = { createService, parseFilters, applyFilters, SOURCE_VERSION, assertOperationalTarget, operationalClient };

@@ -1,13 +1,13 @@
 'use strict';
-const { assertOperationalTarget } = require('./service');
+const { operationalClient } = require('./service');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 const userId = id => { if (!UUID.test(String(id || ''))) throw fail('Usuário inválido.'); return id; };
 const pageNumber = value => { if (value === undefined) return 1; if (!/^\d+$/.test(String(value)) || +value < 1 || +value > 100000) throw fail('Página inválida.'); return +value; };
-function createAdminService({ getDb = () => { assertOperationalTarget(process.env); return require('../../database/supabase'); } } = {}) {
+function createAdminService({ getDb = operationalClient } = {}) {
   async function result(query) { const r = await query; if (r.error) throw fail('Créditos de Prospecção indisponíveis. Verifique a implantação do backend.', 503); return r; }
   async function user(id) {
-    const r = await result(getDb().from('users').select('id,name,email,role,status,organization_id,organizations(name,status)').eq('id', userId(id)).in('role', ['broker','supervisor']).maybeSingle());
+    const r = await result(getDb().from('users').select('id,name,email,role,status,organization_id,organizations!users_organization_id_fkey(name,status)').eq('id', userId(id)).in('role', ['broker','supervisor']).maybeSingle());
     if (!r.data) throw fail('Usuário não encontrado.', 404);
     return r.data;
   }
@@ -20,7 +20,7 @@ function createAdminService({ getDb = () => { assertOperationalTarget(process.en
     async list(q = {}) {
       const page = pageNumber(q.page), search = String(q.search || '').trim();
       if (search.length > 100 || /[^\p{L}\p{N}\s@.+_-]/u.test(search)) throw fail('Use nome ou e-mail na busca.');
-      let query = getDb().from('users').select('id,name,email,role,status,organization_id,organizations(name,status)', { count: 'exact' }).in('role', ['broker','supervisor']);
+      let query = getDb().from('users').select('id,name,email,role,status,organization_id,organizations!users_organization_id_fkey(name,status)', { count: 'exact' }).in('role', ['broker','supervisor']);
       if (search) { const term = search.replace(/_/g, '\\_'); query = query.or(`name.ilike.%${term}%,email.ilike.%${term}%`); }
       const r = await result(query.order('name').order('id').range((page - 1) * 25, page * 25 - 1));
       const balances = await wallets(r.data.map(u => u.id));
