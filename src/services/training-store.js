@@ -93,6 +93,26 @@ function readArray(file) {
   } catch { return []; }
 }
 
+async function referencedRows(table, fields, values) {
+  const ids = [...new Set(values.filter(id => UUID.test(String(id || ''))))];
+  const rows = [];
+  for (let start = 0; start < ids.length; start += 100) {
+    const result = await supabase.from(table).select(fields).in('id', ids.slice(start, start + 100));
+    if (result.error) throw result.error;
+    rows.push(...(result.data || []));
+  }
+  return new Map(rows.map(row => [row.id, row]));
+}
+
+function legacyTrainingId(id) {
+  if (UUID.test(String(id))) return id;
+  // Stable across retries if an import fails after inserting the contents.
+  const bytes = crypto.createHash('sha256').update(`lungo:legacy-training:${id}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 15) | 80; bytes[8] = (bytes[8] & 63) | 128;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+
 async function ensureLegacyImported(trainingFile, progressFile) {
   const environment = process.env.NODE_ENV || 'development';
   const importKey = `training-json-v1:${environment}`;
@@ -105,21 +125,36 @@ async function ensureLegacyImported(trainingFile, progressFile) {
   if (!fs.existsSync(trainingFile) && !fs.existsSync(progressFile)) return;
 
   const legacyTrainings = readArray(trainingFile);
+  const legacyProgress = readArray(progressFile);
+  const organizations = await referencedRows('organizations', 'id', legacyTrainings.map(item => item.organizationId).concat(legacyProgress.map(item => item.organizationId)));
+  const users = await referencedRows('users', 'id,organization_id', legacyTrainings.map(item => item.ownerUserId).concat(legacyProgress.map(item => item.userId)));
   const idMap = new Map();
-  const trainingRows = legacyTrainings.map((item) => {
+  const trainingRows = legacyTrainings.flatMap((item, index) => {
+    const ownerType = item.ownerType || 'admin';
+    // Never turn an orphaned team lesson into global content or reassign it.
+    // The source files remain untouched for subsequent administrative recovery.
+    if (!['admin', 'supervisor'].includes(ownerType)) return [];
+    if (ownerType === 'supervisor' && !organizations.has(item.organizationId)) return [];
     const oldId = String(item.id || '');
-    const id = UUID.test(oldId) ? oldId : crypto.randomUUID();
+    const id = legacyTrainingId(oldId || `row:${index}:${item.title}:${item.url}`);
     if (oldId) idMap.set(oldId, id);
-    return trainingToRow({ ...item, id, ownerType: item.ownerType || 'admin', organizationId: item.ownerType === 'supervisor' ? item.organizationId : null });
+    const owner = users.get(item.ownerUserId);
+    const ownerUserId = owner && (ownerType === 'admin' || owner.organization_id === item.organizationId) ? owner.id : null;
+    return [trainingToRow({ ...item, id, ownerType, ownerUserId, organizationId: ownerType === 'supervisor' ? item.organizationId : null })];
   });
   if (trainingRows.length) {
     const saved = await supabase.from('training_contents').upsert(trainingRows, { onConflict: 'id', ignoreDuplicates: true });
     if (saved.error) throw saved.error;
   }
 
-  const validTrainingIds = new Set(trainingRows.map((item) => item.id));
-  const progressRows = readArray(progressFile).map((item) => ({ ...item, trainingId: idMap.get(String(item.trainingId || '')) || item.trainingId }))
-    .filter((item) => UUID.test(String(item.userId || '')) && UUID.test(String(item.trainingId || '')) && (validTrainingIds.has(item.trainingId) || !legacyTrainings.length))
+  const mappedProgress = legacyProgress.map(item => ({ ...item, trainingId: idMap.get(String(item.trainingId || '')) || item.trainingId }));
+  const trainings = await referencedRows('training_contents', 'id,owner_type,organization_id', mappedProgress.map(item => item.trainingId));
+  const progressRows = mappedProgress.filter(item => {
+    const user = users.get(item.userId), training = trainings.get(item.trainingId);
+    if (!user || !training) return false;
+    if (item.organizationId && (!organizations.has(item.organizationId) || user.organization_id !== item.organizationId)) return false;
+    return training.owner_type === 'admin' || (item.organizationId && training.organization_id === item.organizationId);
+  })
     .map((item) => progressToRow({ ...item, id: UUID.test(String(item.id || '')) ? item.id : crypto.randomUUID() }));
   if (progressRows.length) {
     const saved = await supabase.from('training_progress').upsert(progressRows, { onConflict: 'training_id,user_id', ignoreDuplicates: true });
