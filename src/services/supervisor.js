@@ -65,6 +65,21 @@ async function listSupervisorBrokers(organizationId) {
   });
 }
 
+// Recruitment reconciliation needs identity/status, not photos, sales or raw tokens.
+async function listRecruitmentBrokers(organizationId) {
+  const { data, error } = await supabase.from('users')
+    .select('id,name,email,phone,status,created_at,access_tokens(status,expires_at)')
+    .eq('organization_id', organizationId).eq('role', 'broker').neq('status', 'inactive')
+    .order('created_at', { ascending: false });
+  if (error) throw databaseError('recruitment brokers', error);
+  const now = Date.now();
+  return (data || []).map(broker => ({
+    id: broker.id, name: broker.name, email: broker.email, phone: broker.phone,
+    status: broker.status, createdAt: broker.created_at,
+    tokenActive: (broker.access_tokens || []).some(token => token.status === 'active' && (!token.expires_at || Date.parse(token.expires_at) > now))
+  }));
+}
+
 async function createSupervisorBroker(organizationId, input) {
   const result = await createAdminAccess({ ...input, organizationId, role: 'broker' });
   try {
@@ -214,4 +229,4 @@ async function listSupervisorOperationalCustomers(organizationId, supervisorUser
   catch (error) { throw databaseError('list operational customers', error); }
 }
 
-module.exports = { organizationBroker, getSupervisorDashboard, listSupervisorBrokers, createSupervisorBroker, updateOrganizationBranding, updateOwnProfile, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };
+module.exports = { organizationBroker, getSupervisorDashboard, listSupervisorBrokers, listRecruitmentBrokers, createSupervisorBroker, updateOrganizationBranding, updateOwnProfile, resendSupervisorBrokerEmail, updateSupervisorBroker, changeSupervisorBroker, archiveSupervisorBroker, renewSupervisorBrokerToken, listSupervisorClients, importSupervisorClients, listSupervisorLeads, assignSupervisorLead, listSupervisorOperationalCustomers };

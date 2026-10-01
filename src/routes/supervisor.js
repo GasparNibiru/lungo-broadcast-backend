@@ -21,7 +21,7 @@ function brokerPayload(body, creating = false) {
   return { value };
 }
 
-router.post('/api/access/auth/verify', requireAccess(), async (req, res) => {
+router.post('/api/access/auth/verify', requireAccess([], { includePresentation: true }), async (req, res) => {
   try {
     const client = ['broker', 'supervisor'].includes(req.accessUser.role) ? await legacyBrokerAccess.ensure(req.accessUser, req.accessToken) : null;
     return res.status(200).json({ ok: true, user: req.accessUser, client: client ? { nome: client.nome, instanceName: client.instanceName } : null });
@@ -54,8 +54,8 @@ router.patch('/api/supervisor/branding', requireSupervisor, async (req, res) => 
   catch (error) { return sendError(res, error); }
 });
 
+router.get('/api/supervisor/session', requireAccess('supervisor', { includePresentation: true }), (req, res) => res.status(200).json({ ok: true, user: req.accessUser }));
 router.use('/api/supervisor', requireSupervisor);
-router.get('/api/supervisor/session', (req, res) => res.status(200).json({ ok: true, user: req.accessUser }));
 router.get('/api/supervisor/subscription', async (req, res) => { try { return res.status(200).json({ ok: true, subscription: await cancellation.current(req.accessUser.organizationId) }); } catch (error) { return sendError(res, error); } });
 router.post('/api/supervisor/subscription/cancel', async (req, res) => {
   if (String(req.body?.confirmation || '').trim().toUpperCase() !== 'CANCELAR') return res.status(400).json({ ok: false, error: 'Digite CANCELAR para confirmar.' });
