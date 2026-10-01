@@ -29,6 +29,8 @@ test('manual confirmations are idempotent, scoped, server dated and omit playbac
   }};
   const store=load('services/training-confirmations.js',{'../database/supabase':db});
   const user={id:'broker',name:'Nome',organizationId:'org',role:'broker'};
+  await assert.rejects(store.confirm(trainingId,{...user,role:'supervisor'}), error=>error.statusCode===403);
+  assert.equal(calls.length,0);
   const [first,second]=await Promise.all([store.confirm(trainingId,user),store.confirm(trainingId,user)]);
   assert.equal(records.length,1);assert.equal(first.confirmedAt,second.confirmedAt);
   assert.equal((await store.list({organizationId:'foreign'})).length,0);
@@ -55,6 +57,11 @@ test('confirmation API requires explicit declaration, enforces visibility/identi
   };
   try{
     assert.equal((await request(`/${trainingId}/confirm`,{token:'',body:{confirmed:true}})).status,401);
+    assert.equal((await request(`/${trainingId}/confirm`,{token:'supervisor',body:{confirmed:true}})).status,403);
+    const readsBefore=reads.length;
+    const supervisorLibrary=await request('',{token:'supervisor'});
+    assert.equal(supervisorLibrary.status,200);assert.equal(supervisorLibrary.data.trainings[0].confirmation,null);
+    assert.equal(reads.length,readsBefore,'supervisor library does not query own confirmations');
     assert.equal((await request(`/${trainingId}/confirm`,{body:{confirmed:false}})).status,400);
     for(const id of [foreignId,hiddenId])assert.equal((await request(`/${id}/confirm`,{body:{confirmed:true}})).status,404);
     assert.equal((await request('/bad/confirm',{body:{confirmed:true}})).status,400);

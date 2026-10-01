@@ -22,10 +22,10 @@ function publicTraining(item, records) { const own = records.find(entry => entry
 async function usersFor(query) { const { data, error } = await query; if (error) throw error; return data || []; }
 async function notify(training, users, publisherName) { const recipients = users.filter((user) => user.email); const enabled = process.env.NODE_ENV !== 'staging' || String(process.env.TRAINING_EMAIL_NOTIFICATIONS_ENABLED || '').toLowerCase() === 'true'; if (!enabled) return { recipients: recipients.length, sent: 0, failed: 0, suppressed: true }; const results = await Promise.allSettled(recipients.map((user) => sendTrainingNotificationEmail({ email: user.email, name: user.name, trainingTitle: training.title, track: training.track, publisherName, organizationName: user.organizations?.name || 'Lungo Corretores' }))); return { recipients: recipients.length, sent: results.filter((item) => item.status === 'fulfilled').length, failed: results.filter((item) => item.status === 'rejected').length }; }
 
-router.get('/api/training-center', requireAccess(['supervisor', 'broker']), async (req, res, next) => { try { await prepare(); const [trainings, progress] = await Promise.all([store.listTrainings(), confirmations.list({ userId: req.accessUser.id, organizationId: req.accessUser.organizationId })]); res.json({ ok: true, trainings: sorted(trainings.filter((item) => visibleTo(item, req.accessUser)).map((item) => publicTraining(item, progress))) }); } catch (error) { next(error); } });
+router.get('/api/training-center', requireAccess(['supervisor', 'broker']), async (req, res, next) => { try { await prepare(); const [trainings, progress] = await Promise.all([store.listTrainings(), req.accessUser.role === 'broker' ? confirmations.list({ userId: req.accessUser.id, organizationId: req.accessUser.organizationId, userRole: 'broker' }) : Promise.resolve([])]); res.json({ ok: true, trainings: sorted(trainings.filter((item) => visibleTo(item, req.accessUser)).map((item) => publicTraining(item, progress))) }); } catch (error) { next(error); } });
 // Retired clients must never turn automatic playback writes into declarations.
 router.post('/api/training-center/:id/progress', requireAccess(['supervisor', 'broker']), (_req, res) => res.status(410).json({ ok: false, error: 'Atualize a página e confirme manualmente que assistiu ao treinamento.' }));
-router.post('/api/training-center/:id/confirm', requireAccess(['supervisor', 'broker']), async (req, res, next) => {
+router.post('/api/training-center/:id/confirm', requireAccess('broker'), async (req, res, next) => {
   try {
     if (req.body?.confirmed !== true) return res.status(400).json({ ok: false, error: 'Confirme que assistiu ao treinamento.' });
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.id)) return res.status(400).json({ ok: false, error: 'Treinamento inválido.' });
@@ -42,7 +42,7 @@ router.patch('/api/training-center/supervisor/:id', requireAccess('supervisor'),
 router.delete('/api/training-center/supervisor/:id', requireAccess('supervisor'), async (req, res, next) => { try { await prepare(); const current = await store.getTraining(req.params.id); if (!current || origin(current) !== 'supervisor' || current.organizationId !== req.accessUser.organizationId) return res.status(404).json({ ok: false, error: 'Treinamento não encontrado.' }); await store.deleteTraining(req.params.id); res.json({ ok: true }); } catch (error) { next(error); } });
 
 async function metricsFor(training, organizationId = null) {
-  return confirmations.list({ trainingId: training.id, ...(organizationId ? { organizationId, userRole: 'broker' } : {}) });
+  return confirmations.list({ trainingId: training.id, userRole: 'broker', ...(organizationId ? { organizationId } : {}) });
 }
 router.get('/api/training-center/supervisor/:id/metrics', requireAccess('supervisor'), async (req, res, next) => { try { await prepare(); const training = await store.getTraining(req.params.id); if (!training || !(origin(training) === 'admin' || training.organizationId === req.accessUser.organizationId)) return res.status(404).json({ ok: false, error: 'Treinamento não encontrado.' }); res.json({ ok: true, training: { id: training.id, title: training.title }, viewers: await metricsFor(training, req.accessUser.organizationId) }); } catch (error) { next(error); } });
 

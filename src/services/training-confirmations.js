@@ -17,6 +17,7 @@ async function list(filters) {
 }
 
 async function confirm(trainingId, user) {
+  if (user.role !== 'broker') throw Object.assign(new Error('Somente corretores podem confirmar treinamentos.'), { statusCode: 403 });
   // ON CONFLICT DO NOTHING preserves the first server-generated timestamp,
   // including concurrent clicks and retries after an ambiguous network failure.
   const { error } = await supabase.from('training_confirmations').upsert({
